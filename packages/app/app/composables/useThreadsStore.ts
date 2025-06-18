@@ -1,0 +1,198 @@
+export interface Thread {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  last_message_at: number;
+  parent_thread_id?: string | null;
+  status: "ready" | "streaming" | "error";
+  deleted?: boolean;
+  pinned?: boolean;
+  clock?: number;
+}
+
+export interface GroupedThreads {
+  [groupName: string]: Thread[];
+}
+
+export const useThreadsStore = defineStore("threads", () => {
+  const threads = ref<Record<string, Thread>>({});
+  const activeThread = ref<string | null>(null);
+  const messages = ref<Record<string, any>>({});
+
+  function addMessage(msg: any) {
+    messages.value[msg.id as string] = msg;
+  }
+
+  const messagesList = computed(() =>
+    Object.values(messages.value).toSorted(
+      (a, b) => {
+        // Sort by index first, then by created_at as a safety net
+        if (a.index !== b.index) {
+          return (a.index || 0) - (b.index || 0);
+        }
+        return a.created_at - b.created_at;
+      },
+    ),
+  );
+
+  const pinnedThreads = computed(() => {
+    const result: GroupedThreads = { pinned: [] };
+    for (const thread of Object.values(threads.value)) {
+      if (thread.pinned && !thread.deleted) {
+        result.pinned!.push(thread);
+      }
+    }
+    result.pinned!.sort((a, b) => b.last_message_at - a.last_message_at);
+    return result;
+  });
+
+  const unpinnedThreads = computed(() => {
+    const now = Date.now();
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    const sevenDaysAgo = new Date(today);
+    sevenDaysAgo.setDate(today.getDate() - 7);
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(today.getDate() - 30);
+
+    const groups: GroupedThreads = {
+      today: [],
+      yesterday: [],
+      "last 7 days": [],
+      "last 30 days": [],
+      older: [],
+    };
+
+    const unpinned = Object.values(threads.value)
+      .filter((thread) => !thread.pinned && !thread.deleted)
+      .sort((a, b) => b.last_message_at - a.last_message_at); // Sort by most recent
+
+    unpinned.forEach((thread) => {
+      const threadDate = new Date(thread.last_message_at);
+      if (threadDate >= today) {
+        groups.today!.push(thread);
+      } else if (threadDate >= yesterday) {
+        groups.yesterday!.push(thread);
+      } else if (threadDate >= sevenDaysAgo) {
+        groups["last 7 days"]!.push(thread);
+      } else if (threadDate >= thirtyDaysAgo) {
+        groups["last 30 days"]!.push(thread);
+      } else {
+        groups.older!.push(thread);
+      }
+    });
+
+    for (const groupName of Object.keys(groups)) {
+      if (groups[groupName]!.length === 0) {
+        delete groups[groupName];
+      }
+    }
+
+    return groups;
+  });
+
+  let messagesChannel: BroadcastChannel;
+  function setActiveThread(threadId: string | null) {
+    if (import.meta.client) {
+      activeThread.value = threadId;
+      messages.value = {};
+      if (threadId) {
+        const { $sync } = useNuxtApp();
+        $sync.getMessagesForThread?.(threadId).then((msgs: any[]) => {
+          msgs.forEach((msg) => (messages.value[msg.id] = msg));
+        });
+      }
+      if (messagesChannel) {
+        messagesChannel.close();
+      }
+      messagesChannel = new BroadcastChannel(`messages-channel-${threadId}`);
+      messagesChannel.onmessage = (
+        event: MessageEvent<{ type: string; payload: any }>,
+      ) => {
+        const { type, payload } = event.data;
+        if (type === "message_update") {
+          if (payload.thread_id !== activeThread.value) return;
+          messages.value[payload.id] = payload;
+        } else if (type === "message_delete") {
+          // TODO: what?
+        }
+      };
+    }
+  }
+
+  function setThread(thread: Thread) {
+    threads.value[thread.id] = thread;
+  }
+
+  function addThreads(newThreads: Thread[]) {
+    newThreads.forEach((thread) => {
+      threads.value[thread.id] = thread;
+    });
+  }
+
+  function removeThread(threadId: string) {
+    // Soft delete or hard delete based on requirements
+    if (threads.value[threadId]) {
+      // Option 1: Soft delete
+      // threads.value[threadId].deleted = true;
+      // Option 2: Hard delete from local store
+      delete threads.value[threadId];
+    }
+  }
+
+  // Remove Sample Data
+  // if (Object.keys(threads.value).length === 0) { ... }
+
+  if (import.meta.client) {
+    const { $sync } = useNuxtApp();
+
+    const fetchInitialThreads = async () => {
+      try {
+        const initialThreadsArray = await $sync.getThreads!();
+        if (initialThreadsArray) {
+          addThreads(initialThreadsArray);
+        }
+      } catch (error) {
+        console.error("Failed to fetch initial threads:", error);
+      }
+    };
+
+    fetchInitialThreads();
+
+    const threadsChannel = new BroadcastChannel("threads-channel");
+    threadsChannel.onmessage = (event: MessageEvent) => {
+      const { type, payload } = event.data as { type: string; payload: any };
+      if (type === "thread_update") {
+        const thread = payload as Thread;
+        setThread(thread);
+      } else if (type === "thread_delete") {
+        // Assuming payload is { id: string } for delete
+        removeThread(payload.id);
+      }
+    };
+
+    // Cleanup channel on store unmount (though Pinia stores are not typically unmounted like components)
+    // If this store is module-scoped and lives for the app's lifetime, explicit closing might not be urgent
+    // but good practice if the app can fully "shut down" this part.
+    // onUnmounted(() => {
+    //   threadsChannel.close();
+    // });
+  }
+
+  return {
+    threads,
+    messages,
+    messagesList,
+    activeThread,
+    pinnedThreads,
+    unpinnedThreads,
+    setThread,
+    setActiveThread,
+    addThreads,
+    removeThread,
+    addMessage,
+  };
+});

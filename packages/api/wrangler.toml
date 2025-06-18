@@ -1,0 +1,20 @@
+name = "chat-test"
+main = "index.ts"
+compatibility_date = "2024-11-12"
+compatibility_flags = [ "nodejs_compat", "enable_request_signal" ]
+
+[[durable_objects.bindings]]
+name = "USER"
+class_name = "User"
+[[durable_objects.bindings]]
+name = "STREAM"
+class_name = "Stream"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["User", "Stream"]
+
+[[rules]] 
+type = "Text"
+globs = ["**/*.sql"]
+fallthrough = true
