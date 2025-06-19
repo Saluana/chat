@@ -8,7 +8,27 @@ let db: number;
 const THREADS_CHANNEL_NAME = "threads-channel";
 let threadsChannel: BroadcastChannel;
 
-// Helper to map array row to object based on explicit column list
+let dbReadyResolvers: Array<() => void> = [];
+let isDbReady = false;
+function waitForDatabase(): Promise<void> {
+  if (isDbReady) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    dbReadyResolvers.push(resolve);
+  });
+}
+let syncReadyResolvers: Array<() => void> = [];
+let isSyncReady = false;
+function waitForSync(): Promise<void> {
+  if (isSyncReady) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    syncReadyResolvers.push(resolve);
+  });
+}
+
 function mapRowToThread(rowArray: any[], columnNames: string[]): Thread {
   const rowObj = columnNames.reduce((acc, name, idx) => {
     acc[name] = rowArray[idx];
@@ -102,6 +122,10 @@ async function initService() {
     `,
   );
   threadsChannel = new BroadcastChannel(THREADS_CHANNEL_NAME);
+  isDbReady = true;
+  console.log("db ready!");
+  dbReadyResolvers.forEach((resolve) => resolve());
+  dbReadyResolvers = [];
 }
 
 // TODO: switch to OPFS in a worker
@@ -121,11 +145,7 @@ export function syncServiceProvider() {
   }
 
   async function applyChange(msg: any) {
-    if (!sqlite3 || !db) {
-      console.error("Database not initialized, cannot apply change.");
-      return;
-    }
-
+    await waitForDatabase();
     if (msg.type === "thread" && msg.data) {
       const backendThread = msg.data;
       const newClock = msg.clock;
@@ -311,7 +331,6 @@ export function syncServiceProvider() {
       onMessage: async (_ws, event) => {
         try {
           const msg = JSON.parse(event.data as string);
-          console.log("SW WS received:", msg);
           await applyChange(msg);
         } catch (e) {
           console.error(
@@ -326,27 +345,21 @@ export function syncServiceProvider() {
   }
 
   async function pullChanges() {
-    if (!_endpoint || !_token) {
-      console.error("Cannot pull changes: endpoint or token not set");
-      return;
-    }
-
     try {
+      console.log("pulling?");
       const response = await fetch(`${_endpoint}/pull`, {
         headers: {
           Authentication: `Bearer ${_token}`,
         },
       });
-
+      console.log("res", response);
       if (!response.ok) {
         throw new Error(
           `Failed to pull changes: ${response.status} ${response.statusText}`,
         );
       }
-
       const data = await response.json();
-
-      // Process threads
+      console.log("data", data);
       if (data.threads && Array.isArray(data.threads)) {
         for (const thread of data.threads) {
           await applyChange({
@@ -356,8 +369,6 @@ export function syncServiceProvider() {
           });
         }
       }
-
-      // Process messages
       if (data.messages && Array.isArray(data.messages)) {
         for (const message of data.messages) {
           await applyChange({
@@ -367,8 +378,6 @@ export function syncServiceProvider() {
           });
         }
       }
-
-      // Process KV
       if (data.kvs && Array.isArray(data.kvs)) {
         for (const kv of data.kvs) {
           await applyChange({
@@ -378,11 +387,8 @@ export function syncServiceProvider() {
           });
         }
       }
-
       console.log(
-        `Pull completed: processed ${data.threads?.length || 0} threads, ${
-          data.messages?.length || 0
-        } messages, and ${data.kvs?.length || 0} KV pairs`,
+        `pulled ${data.kvs.length + data.messages.length + data.threads.length} changes!`,
       );
     } catch (error) {
       console.error("Error pulling changes:", error);
@@ -390,14 +396,28 @@ export function syncServiceProvider() {
   }
 
   const api = {
+    isReady() {
+      return true;
+    },
+    isSyncReady() {
+      return isSyncReady;
+    },
     async setAuthInfo(endpoint: string, token: string) {
+      await waitForDatabase();
       if (endpoint !== _endpoint || token !== _token) {
         _endpoint = endpoint;
         _token = token;
-        restartWebsocketsServer();
-        pullChanges();
+        pullChanges()
+          .then(() => {
+            restartWebsocketsServer();
+          })
+          .then(() => {
+            isSyncReady = true;
+            console.log("sync ready!");
+            syncReadyResolvers.forEach((resolve) => resolve());
+            syncReadyResolvers = [];
+          });
       }
-      return null;
     },
     async newThread(params: {
       messageContent: string;
@@ -405,7 +425,7 @@ export function syncServiceProvider() {
       model?: string;
       thinkingBudget?: string;
     }) {
-      if (!sqlite3 || !db) throw new Error("Database not initialized");
+      await waitForSync();
       const threadId = crypto.randomUUID();
       const messageId = crypto.randomUUID();
       const title =
@@ -445,7 +465,7 @@ export function syncServiceProvider() {
       return { threadId };
     },
     async getThread(threadId: string): Promise<Thread | null> {
-      if (!sqlite3 || !db) throw new Error("Database not initialized");
+      await waitForDatabase();
       const { rows } = await sqlite3.execWithParams(
         db,
         `SELECT ${THREAD_COLUMNS.join(", ")} FROM threads WHERE id = ? AND deleted = 0`,
@@ -455,7 +475,7 @@ export function syncServiceProvider() {
       return thread;
     },
     async getThreads(): Promise<Thread[]> {
-      if (!sqlite3 || !db) throw new Error("Database not initialized");
+      await waitForDatabase();
       const threads: Thread[] = [];
       await sqlite3.exec(
         db,
@@ -467,7 +487,7 @@ export function syncServiceProvider() {
       return threads;
     },
     async getMessagesForThread(threadId: string): Promise<any[]> {
-      if (!sqlite3 || !db) throw new Error("Database not initialized");
+      await waitForDatabase();
       const { rows } = await sqlite3.execWithParams(
         db,
         `SELECT id, role, content, data, created_at, updated_at, error, deleted, thread_id, clock, stream_id, message_index
@@ -491,7 +511,7 @@ export function syncServiceProvider() {
       return messages;
     },
     async updateThread(id: string, update: any) {
-      if (!sqlite3 || !db) throw new Error("Database not initialized");
+      await waitForSync();
       const pushObj: PushEvent = {
         id: crypto.randomUUID(),
         events: [
@@ -511,7 +531,7 @@ export function syncServiceProvider() {
       message: any,
       options?: { model?: string; thinkingBudget?: string },
     ) {
-      if (!sqlite3 || !db) throw new Error("Database not initialized");
+      await waitForSync();
       const pushObj: PushEvent = {
         id: crypto.randomUUID(),
         events: [
@@ -542,7 +562,7 @@ export function syncServiceProvider() {
       messageId: string,
       options?: { model?: string; thinkingBudget?: string },
     ) {
-      if (!sqlite3 || !db) throw new Error("Database not initialized");
+      await waitForSync();
 
       // First get the message to find the thread ID
       const { rows } = await sqlite3.execWithParams(
@@ -574,7 +594,7 @@ export function syncServiceProvider() {
     },
     async branchThread() {},
     async getKV(name: string): Promise<string | null> {
-      if (!sqlite3 || !db) throw new Error("Database not initialized");
+      await waitForDatabase();
       const { rows } = await sqlite3.execWithParams(
         db,
         `SELECT value FROM kv WHERE name = ?`,
@@ -583,7 +603,7 @@ export function syncServiceProvider() {
       return rows[0] ? rows[0][0] : null;
     },
     async setKV(name: string, value: string) {
-      if (!sqlite3 || !db) throw new Error("Database not initialized");
+      await waitForSync();
       const pushObj: PushEvent = {
         id: crypto.randomUUID(),
         events: [

@@ -47,8 +47,8 @@
           :ui="{
             base: 'truncate p-0 pb-0.5 ring-0 focus-visible:ring-0 border-b border-b-neutral-600/50 rounded-none bg-transparent',
           }"
-          @blur="saveThread(thread, $event.target.value)"
-          @keydown.enter="saveThread(thread, $event)"
+          @blur="saveThread(thread)"
+          @keydown.enter="saveThread(thread)"
         />
 
         <div
@@ -133,17 +133,17 @@ const props = defineProps({
     default: false,
   },
 });
-const colorMode = useColorMode();
 const threadsStore = useThreadsStore();
 const popperThreadId = ref<number | null>(null);
 const { activeThread } = storeToRefs(threadsStore);
+const { $sync } = useNuxtApp();
 
 function switchThread(thread: any) {
   navigateTo(`/${thread.id}`);
 }
 
 const editableThreadId = ref<number | null>(null);
-const editThread = (thread) => {
+const editThread = (thread: any) => {
   editableThreadId.value = thread.id;
   requestAnimationFrame(() => {
     const input = document.getElementById(`thread-input-${thread.id}`);
@@ -151,9 +151,9 @@ const editThread = (thread) => {
   });
 };
 
-const saveThread = (thread, event) => {
+const saveThread = (thread: any) => {
   editableThreadId.value = null;
-  //logic to save the thread title
+  $sync.updateThread(thread.id, { title: thread.title });
 };
 
 const pinnedAction = ref({

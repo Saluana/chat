@@ -91,11 +91,11 @@ const models = ref([
     imageUploads: true,
     webSearch: true,
     pdfUploads: true,
-    reasoningAbility: false,
+    reasoningAbility: true,
     generateImage: false,
   },
   {
-    label: "Google: Gemini 2.5 Pro Preview 06-05",
+    label: "Gemini 2.5 Pro Preview 06-05",
     apiModel: "google/gemini-2.5-pro-preview-06-05",
     imageUploads: true,
     webSearch: true,

@@ -25,15 +25,13 @@ export const useThreadsStore = defineStore("threads", () => {
   }
 
   const messagesList = computed(() =>
-    Object.values(messages.value).toSorted(
-      (a, b) => {
-        // Sort by index first, then by created_at as a safety net
-        if (a.index !== b.index) {
-          return (a.index || 0) - (b.index || 0);
-        }
-        return a.created_at - b.created_at;
-      },
-    ),
+    Object.values(messages.value).toSorted((a, b) => {
+      // Sort by index first, then by created_at as a safety net
+      if (a.index !== b.index) {
+        return (a.index || 0) - (b.index || 0);
+      }
+      return a.created_at - b.created_at;
+    }),
   );
 
   const pinnedThreads = computed(() => {
