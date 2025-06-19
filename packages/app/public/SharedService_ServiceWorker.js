@@ -14,10 +14,19 @@ globalThis.addEventListener(
   },
 );
 
+async function log(text) {
+  await new Promise((res) => setTimeout(res, 0));
+  throw new Error(text);
+}
+
 // Forward messages (and ports) from client to client.
 globalThis.addEventListener("message", async (event) => {
-  if (event.data?.sharedService) {
-    const client = await globalThis.clients.get(event.data.clientId);
+  if (event.data?.get_client_id) {
+    event.source.postMessage({
+      client_id: event.source.id,
+    });
+  } else if (event.data?.sharedService) {
+    const client = await globalThis.clients.get(event.source.id);
     client.postMessage(event.data, event.ports);
   }
 });

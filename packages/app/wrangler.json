@@ -1,0 +1,23 @@
+{
+  "name": "nuxflare-chat",
+  "main": "./.output/server/index.mjs",
+  "compatibility_date": "2024-12-05",
+  "assets": {
+    "directory": "./.output/public",
+    "binding": "ASSETS"
+  },
+  "routes": [
+    {
+      "pattern": "chat.nuxflare.com",
+      "custom_domain": true
+    }
+  ],
+  "compatibility_flags": ["nodejs_compat"],
+  "vars": {
+    "NUXT_PUBLIC_API_URL": "https://nuxflare-chat-api.hi-04d.workers.dev",
+    "NUXT_PUBLIC_AUTH_URL": "https://auth.prodemo.nuxflare.com"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

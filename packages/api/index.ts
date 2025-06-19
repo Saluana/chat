@@ -574,7 +574,6 @@ export class Stream extends DurableObject {
       const res = streamText(streamConfig);
       const { textStream } = res;
       for await (const part of textStream) {
-        console.log("part", part);
         this.response += part;
         for (const controller of this.activeStreams) {
           try {
@@ -584,7 +583,6 @@ export class Stream extends DurableObject {
           }
         }
       }
-      console.log(await res.warnings, await res.response);
       for (const controller of this.activeStreams) {
         try {
           controller.close();

@@ -145,22 +145,32 @@ export class SharedService extends EventTarget {
     // It is possible to do this without polling but it requires about the
     // same amount of code and using fetch makes 100% certain the service
     // worker is handling requests.
-    let clientId;
-    while (!clientId) {
-      clientId = await fetch("./clientId").then((response) => {
-        if (response.ok) {
-          return response.text();
-        }
-        console.warn("service worker not ready, retrying...");
-        return new Promise((resolve) => setTimeout(resolve, 100));
-      });
-    }
+    // let clientId;
+    // while (!clientId) {
+    //   clientId = await fetch("./clientId").then(async (response) => {
+    //     if (response.ok) {
+    //       const id = await response.text();
+    //       // uuid
+    //       if (id.length < 40) return id;
+    //     }
+    //     console.warn("service worker not ready, retrying...");
+    //     return new Promise((resolve) => setTimeout(resolve, 100));
+    //   });
+    // }
 
+    let sendClient;
+    const clientIdPromise = new Promise((res) => {
+      sendClient = res;
+    });
     navigator.serviceWorker.addEventListener("message", (event) => {
+      if (event.data?.client_id) return sendClient(event.data.client_id);
       event.data.ports = event.ports;
       this.dispatchEvent(new MessageEvent("message", { data: event.data }));
     });
-
+    await navigator.serviceWorker.ready.then((reg) => {
+      reg.active?.postMessage({ get_client_id: true });
+    });
+    const clientId = await clientIdPromise;
     // Acquire a Web Lock named after the clientId. This lets other contexts
     // track this context's lifetime.
     // TODO: It would be better to lock on the clientId+serviceName (passing

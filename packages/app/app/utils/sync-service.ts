@@ -346,20 +346,17 @@ export function syncServiceProvider() {
 
   async function pullChanges() {
     try {
-      console.log("pulling?");
       const response = await fetch(`${_endpoint}/pull`, {
         headers: {
           Authentication: `Bearer ${_token}`,
         },
       });
-      console.log("res", response);
       if (!response.ok) {
         throw new Error(
           `Failed to pull changes: ${response.status} ${response.statusText}`,
         );
       }
       const data = await response.json();
-      console.log("data", data);
       if (data.threads && Array.isArray(data.threads)) {
         for (const thread of data.threads) {
           await applyChange({

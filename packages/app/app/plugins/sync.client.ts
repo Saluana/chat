@@ -1,7 +1,9 @@
 export default defineNuxtPlugin({
   name: "sync",
   async setup() {
-    navigator.serviceWorker.register("SharedService_ServiceWorker.js");
+    await navigator.serviceWorker
+      .register("SharedService_ServiceWorker.js")
+      .then(() => navigator.serviceWorker.ready);
     const sharedService = new SharedService(
       "sync-service",
       syncServiceProvider,
