@@ -589,7 +589,28 @@ export function syncServiceProvider() {
       };
       wsSendFunction?.(JSON.stringify(pushObj));
     },
-    async branchThread() {},
+    async branchThread(
+      threadId: string,
+      messageId: string,
+      newThreadId: string,
+    ) {
+      await waitForSync();
+      const pushObj: PushEvent = {
+        id: crypto.randomUUID(),
+        events: [
+          {
+            type: "branch_thread",
+            data: {
+              newThreadId,
+              threadId,
+              messageId,
+            },
+          },
+        ],
+      };
+      wsSendFunction?.(JSON.stringify(pushObj));
+      return newThreadId;
+    },
     async getKV(name: string): Promise<string | null> {
       await waitForDatabase();
       const { rows } = await sqlite3.execWithParams(

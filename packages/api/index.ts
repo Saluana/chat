@@ -12,9 +12,8 @@ import * as v from "valibot";
 import { PushEvent, SyncEvent, PushEventSchema } from "./types";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
-import { generateText, streamText } from "ai";
+import { streamText } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 
 let _client: ReturnType<typeof createClient>;
 const getClient = () => {
@@ -183,13 +182,12 @@ export class User extends DurableObject {
           }
         } else if (event.type === "new_message") {
           const { id, data, role, threadId } = event.data;
-          // TODO: do we want to let database do this with foreign keys
+          // TODO: do we want to let database do this with foreign keys?
           const thread = await this.db.query.threads.findFirst({
             where: (threads, { eq }) => eq(threads.id, threadId),
           });
           if (!thread) continue;
 
-          // Get the next index for this thread
           const maxIndexResult = await this.db.query.messages.findFirst({
             where: (messages, { eq, and, eq: equal }) =>
               and(
@@ -277,6 +275,13 @@ export class User extends DurableObject {
           }
         } else if (event.type === "run_thread") {
           const { threadId, messageId, options } = event.data;
+
+          const currentThread = await this.db.query.threads.findFirst({
+            where: (threads, { eq }) => eq(threads.id, threadId),
+          });
+          if (!currentThread) continue;
+          if (currentThread.status === "streaming") continue;
+
           const streamId = crypto.randomUUID();
 
           let messages = await this.db.query.messages.findMany({
@@ -291,7 +296,6 @@ export class User extends DurableObject {
             ],
           });
 
-          // If messageId is provided (retry case), only include messages before the retry message
           if (messageId) {
             const retryMessage = messages.find((msg) => msg.id === messageId);
             if (retryMessage) {
@@ -310,7 +314,6 @@ export class User extends DurableObject {
           let messageIdToUse: string;
 
           if (messageId) {
-            // Update existing message
             messageIdToUse = messageId;
             const clock = this.#tick();
             message = this.db
@@ -325,8 +328,6 @@ export class User extends DurableObject {
               .get();
           } else {
             messageIdToUse = crypto.randomUUID();
-
-            // Get the next index for this thread
             const maxIndexResult = await this.db.query.messages.findFirst({
               where: (messages, { eq, and, eq: equal }) =>
                 and(
@@ -390,19 +391,15 @@ export class User extends DurableObject {
 
           (async () => {
             try {
-              // Extract model and options for the stream
               const model = options?.model;
               const streamOptions = {
                 thinkingBudget: options?.thinkingBudget, // "low", "medium", "high"
                 ...options,
               };
-
-              // Get API key from KV
               const apiKeyRecord = await this.db.query.kv.findFirst({
                 where: (kv, { eq }) => eq(kv.name, "openrouter_api_key"),
               });
               const apiKey = apiKeyRecord?.value || "";
-
               const response = await streamStub.init(
                 formattedMessages,
                 model,
@@ -421,7 +418,6 @@ export class User extends DurableObject {
                 .where(sql`id = ${messageIdToUse}`)
                 .returning()
                 .get();
-
               if (updatedMessage) {
                 syncEvents.push({
                   type: "message",
@@ -460,7 +456,6 @@ export class User extends DurableObject {
                 .where(sql`id = ${threadId}`)
                 .returning()
                 .get();
-
               if (errorThread) {
                 this.#sendEvents([
                   {
@@ -474,6 +469,96 @@ export class User extends DurableObject {
           })();
         } else if (event.type === "stop_thread") {
           // TODO: Implement stop_thread logic
+        } else if (event.type === "branch_thread") {
+          const { threadId, messageId, newThreadId } = event.data;
+
+          const sourceThread = await this.db.query.threads.findFirst({
+            where: (threads, { eq }) => eq(threads.id, threadId),
+          });
+          if (!sourceThread) continue;
+          const branchMessage = await this.db.query.messages.findFirst({
+            where: (messages, { eq }) => eq(messages.id, messageId),
+          });
+          if (!branchMessage) continue;
+
+          const messagesToCopy = await this.db.query.messages.findMany({
+            where: (messages, { eq, and, lte, eq: equal }) =>
+              and(
+                eq(messages.thread_id, threadId),
+                lte(messages.index, branchMessage.index),
+                equal(messages.deleted, false),
+              ),
+            orderBy: (messages, { asc }) => [
+              asc(messages.index),
+              asc(messages.created_at),
+            ],
+          });
+
+          const threadClock = this.#tick();
+          const newThread = this.db
+            .insert(schema.threads)
+            .values({
+              id: newThreadId,
+              title: sourceThread.title,
+              parent_thread_id: threadId,
+              clock: threadClock,
+              deleted: false,
+              pinned: false,
+            })
+            .returning()
+            .get();
+
+          syncEvents.push({
+            type: "thread",
+            clock: threadClock,
+            data: newThread,
+          });
+
+          for (const message of messagesToCopy) {
+            const newMessageId = crypto.randomUUID();
+            const messageClock = this.#tick();
+            const copiedMessage = this.db
+              .insert(schema.messages)
+              .values({
+                id: newMessageId,
+                thread_id: newThreadId,
+                data: message.data,
+                role: message.role,
+                index: message.index,
+                clock: messageClock,
+                deleted: false,
+                created_at: message.created_at,
+                error: message.error,
+              })
+              .returning()
+              .get();
+
+            syncEvents.push({
+              type: "message",
+              clock: messageClock,
+              data: copiedMessage,
+            });
+          }
+          if (messagesToCopy.length > 0) {
+            const lastMessage = messagesToCopy[messagesToCopy.length - 1];
+            const finalThreadClock = this.#tick();
+            const updatedNewThread = this.db
+              .update(schema.threads)
+              .set({
+                last_message_at: lastMessage.updated_at,
+                clock: finalThreadClock,
+              })
+              .where(sql`id = ${newThreadId}`)
+              .returning()
+              .get();
+            if (updatedNewThread) {
+              syncEvents.push({
+                type: "thread",
+                clock: finalThreadClock,
+                data: updatedNewThread,
+              });
+            }
+          }
         } else if (event.type === "set_kv") {
           const { name, value } = event.data;
           const clock = this.#tick();

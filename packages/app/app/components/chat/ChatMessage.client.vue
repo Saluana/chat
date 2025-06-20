@@ -115,7 +115,7 @@ interface ChatMessageProps {
 const props = withDefaults(defineProps<ChatMessageProps>(), {
   showTimestamp: false,
 });
-const emit = defineEmits(["retryMessage"]);
+const emit = defineEmits(["retryMessage", "branchThread"]);
 
 const editUserMessage = ref(false);
 const editedMessageContent = ref("");
@@ -160,7 +160,7 @@ const userMessageActions = computed(() => [
     icon: "carbon:branch",
     tooltip: "Branch off",
     action: () => {
-      // Implement action to edit message
+      emit("branchThread", props.message.id);
     },
   },
   {
@@ -211,7 +211,7 @@ const assistantMessageActions = computed(() => [
     icon: "carbon:branch",
     tooltip: "Branch off",
     action: () => {
-      // Implement action to edit message
+      emit("branchThread", props.message.id);
     },
   },
   {

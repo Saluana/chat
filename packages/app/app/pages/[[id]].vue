@@ -111,6 +111,7 @@
             :message="message"
             :loading="loading"
             @retryMessage="() => retryMessage(message.id)"
+            @branchThread="() => branchThread(message.id)"
           />
         </div>
       </UContainer>
@@ -310,6 +311,12 @@ const retryMessage = async (messageId: string) => {
     console.error("Failed to retry message:", error);
     // TODO: Show error to user
   }
+};
+
+const branchThread = async (messageId: string) => {
+  const newThreadId = crypto.randomUUID();
+  navigateTo(`/${newThreadId}`);
+  await $sync.branchThread(currentThreadId.value, messageId, newThreadId);
 };
 
 const messagesContainer = ref<HTMLElement>();

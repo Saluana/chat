@@ -26,9 +26,6 @@ export const NewMessageSchema = v.object({
     data: v.any(),
     role: v.picklist(["user", "assistant", "system"]),
     threadId: v.string(),
-    // TODO: should it possible to pass timestamps here?
-    // would be useful in case of branched threads.
-    // for now, i'm skipping stuff like created, updated, error, deleted
   }),
 });
 
@@ -67,6 +64,15 @@ export const StopThreadSchema = v.object({
   }),
 });
 
+export const BranchThreadSchema = v.object({
+  type: v.literal("branch_thread"),
+  data: v.object({
+    newThreadId: v.string(),
+    threadId: v.string(),
+    messageId: v.string(),
+  }),
+});
+
 export const PushEventSchema = v.object({
   id: v.string(),
   events: v.array(
@@ -78,6 +84,7 @@ export const PushEventSchema = v.object({
       RunThreadSchema,
       SetKVSchema,
       StopThreadSchema,
+      BranchThreadSchema,
     ]),
   ),
 });

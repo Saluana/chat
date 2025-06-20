@@ -18,23 +18,27 @@ export default defineNuxtPlugin({
       while (!_ready) {
         await new Promise((res) => setTimeout(res, 30));
         try {
-          _ready = await sharedService.proxy["isReady"]!();
-          readyResolvers.forEach((res) => res());
+          _ready = await Promise.race([
+            new Promise((res) => setTimeout(res, 100)),
+            sharedService.proxy["isReady"]!(),
+          ]);
         } catch (err) {
           console.log("err", err);
           // retry
         }
       }
+      console.log("_ready");
+      readyResolvers.forEach((res) => res());
       while (!_syncReady) {
         await new Promise((res) => setTimeout(res, 30));
         try {
           _syncReady = await sharedService.proxy["isSyncReady"]!();
-          syncReadyResolvers.forEach((res) => res());
-        } catch (err) {
-          console.log("err", err);
+        } catch {
           // retry
         }
       }
+      console.log("_syncReady");
+      syncReadyResolvers.forEach((res) => res());
     })();
 
     async function isReady() {
@@ -101,6 +105,18 @@ export default defineNuxtPlugin({
             return await sharedService.proxy["retryMessage"]!(
               messageId,
               options,
+            );
+          },
+          async branchThread(
+            threadId: string,
+            messageId: string,
+            newThreadId: string,
+          ) {
+            await isSyncReady();
+            return await sharedService.proxy["branchThread"]!(
+              threadId,
+              messageId,
+              newThreadId,
             );
           },
         },

@@ -26,7 +26,7 @@ globalThis.addEventListener("message", async (event) => {
       client_id: event.source.id,
     });
   } else if (event.data?.sharedService) {
-    const client = await globalThis.clients.get(event.source.id);
+    const client = await globalThis.clients.get(event.data.clientId);
     client.postMessage(event.data, event.ports);
   }
 });
