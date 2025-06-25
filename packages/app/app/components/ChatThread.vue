@@ -116,7 +116,7 @@
 
   <DeleteModal
     v-model="openDeleteModal"
-    :threadToDelete="threadToDelete"
+    :thread="threadToDelete"
     @cancelDelete="cancelDelete"
     @confirmDelete="confirmDelete"
   />
@@ -178,13 +178,13 @@ const moreOptionsAction = ref({
 });
 
 const openDeleteModal = ref(false);
-const threadToDelete = ref(null);
+const threadToDelete = ref<any>(null);
 
 const moreActions = ref([
   {
     icon: props.pinned ? unpinnedAction.value.icon : pinnedAction.value.icon,
     name: props.pinned ? "Unpin" : "Pin",
-    action: (thread) => {
+    action: (thread: any) => {
       if (props.pinned) {
         unpinnedAction.value.action(thread.id);
       } else {

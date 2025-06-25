@@ -65,8 +65,8 @@
           />
           <RenderMessage :content="message.content" />
           <AssistantErrorMessage
-            v-if="message.error"
-            :message="message?.error"
+            :error="message.error"
+            v-if="!message.stream_id && message.error"
           />
         </div>
         <WebSearch v-if="message.webSearch" :content="message.webSearch" />

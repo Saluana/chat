@@ -131,17 +131,10 @@ export const useThreadsStore = defineStore("threads", () => {
   }
 
   function removeThread(threadId: string) {
-    // Soft delete or hard delete based on requirements
     if (threads.value[threadId]) {
-      // Option 1: Soft delete
-      // threads.value[threadId].deleted = true;
-      // Option 2: Hard delete from local store
       delete threads.value[threadId];
     }
   }
-
-  // Remove Sample Data
-  // if (Object.keys(threads.value).length === 0) { ... }
 
   if (import.meta.client) {
     const { $sync } = useNuxtApp();

@@ -15,11 +15,13 @@
   >
     <template #body>
       <div class="flex flex-col items-start gap-4">
-        <h3 class="text-lg font-semibold">Delete Thread</h3>
+        <h3 class="text-lg font-semibold">
+          Delete {{ thread ? "Thread" : "Message" }}
+        </h3>
         <p class="text-neutral-700 dark:text-neutral-400 mb-4">
-          <span v-if="threadToDelete">
-            Are you sure you want to delete "{{ threadToDelete?.title }}"? This
-            action cannot be undone.
+          <span v-if="thread">
+            Are you sure you want to delete "{{ thread?.title }}"? This action
+            cannot be undone.
           </span>
           <span v-else>
             Are you sure you want to delete this message? This action cannot be
@@ -55,9 +57,9 @@
 const openDeleteModal = defineModel<boolean>();
 
 interface Props {
-  threadToDelete?: Object;
+  thread?: any;
 }
-const props = defineProps<Props>();
+const { thread } = defineProps<Props>();
 const emit = defineEmits(["cancelDelete", "confirmDelete"]);
 
 const cancelDelete = () => {

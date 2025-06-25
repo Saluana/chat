@@ -1,6 +1,6 @@
 <template>
   <div>
-    <VueSpinnerDots v-if="!(content.length > 0)" class="w-10 my-10" />
+    <VueSpinnerDots v-if="!(content.length > 0)" class="w-10" />
     <RenderMessage :content="content" />
   </div>
 </template>

@@ -131,7 +131,6 @@ export class User extends DurableObject {
 
   async #processEvents(events: PushEvent["events"]) {
     const syncEvents: SyncEvent[] = [];
-    console.log("events", events);
     try {
       for (const event of events) {
         if (event.type === "new_thread") {
@@ -446,26 +445,40 @@ export class User extends DurableObject {
               }
               this.#sendEvents(syncEvents);
             } catch (error) {
-              console.error("Stream processing error:", error);
+              const syncEvents: SyncEvent[] = [];
+
+              let partialResponse = "";
+              try {
+                partialResponse = await streamStub.getPartialResponse();
+              } catch (e) {
+                console.error("Error getting partial response:", e);
+              }
+
+              // Update message with partial content and error
+              // TODO: handle more specific error messages?
               const errorClock = this.#tick();
-              const errorThread = this.db
-                .update(schema.threads)
+              const errorMessage = this.db
+                .update(schema.messages)
                 .set({
-                  status: "error",
+                  data: { content: partialResponse },
+                  error: JSON.stringify({
+                    type: "StreamError",
+                    message: "An error occurred while generating the message",
+                  }),
+                  stream_id: null,
                   clock: errorClock,
                 })
-                .where(sql`id = ${threadId}`)
+                .where(sql`id = ${messageIdToUse}`)
                 .returning()
                 .get();
-              if (errorThread) {
-                this.#sendEvents([
-                  {
-                    type: "thread",
-                    clock: errorClock,
-                    data: errorThread,
-                  },
-                ]);
+              if (errorMessage) {
+                syncEvents.push({
+                  type: "message",
+                  clock: errorClock,
+                  data: errorMessage,
+                });
               }
+              this.#sendEvents(syncEvents);
             }
           })();
         } else if (event.type === "stop_thread") {
@@ -648,52 +661,56 @@ export class Stream extends DurableObject {
       const streamConfig: any = {
         model: openrouter(model),
         messages,
-        onError: console.log,
+        onError: (error: any) => {
+          for (const controller of this.activeStreams) {
+            try {
+              controller.close();
+            } catch (e) {
+              console.error("Error closing stream", e);
+            }
+          }
+          this.activeStreams = [];
+          this.done = true;
+          throw error;
+        },
       };
-
       if (options.thinkingBudget) {
         streamConfig.reasoning = {
           effort: options.thinkingBudget, // "low", "medium", or "high"
         };
       }
-
       const res = streamText(streamConfig);
-      const { textStream, response, warnings } = res;
+      const { textStream } = res;
       for await (const part of textStream) {
         this.response += part;
         for (const controller of this.activeStreams) {
           try {
             controller.enqueue(part);
-          } catch (e) {
-            console.error("Error sending to stream", e);
-          }
+          } catch {}
         }
       }
       for (const controller of this.activeStreams) {
         try {
           controller.close();
-        } catch (e) {
-          console.error("Error closing stream", e);
-        }
+        } catch {}
       }
       this.activeStreams = [];
-      response.then(console.log);
-      warnings.then(console.log);
       this.done = true;
     } catch (error) {
-      console.error("Stream error:", error);
       for (const controller of this.activeStreams) {
         try {
           controller.error(error);
-        } catch (e) {
-          console.error("Error closing stream with error", e);
-        }
+        } catch {}
       }
       this.activeStreams = [];
       this.done = true;
       throw error;
     }
-    // TODO: handle errors, interrupts. also, should we return response like this or have the DO do a async callback.
+    // TODO: should we return response like this or have the DO do a async callback.
+    return this.response;
+  }
+
+  async getPartialResponse() {
     return this.response;
   }
 
