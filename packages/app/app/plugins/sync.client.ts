@@ -119,6 +119,13 @@ export default defineNuxtPlugin({
               newThreadId,
             );
           },
+          async updateMessage(
+            id: string,
+            update: { data?: any; deleted?: boolean },
+          ) {
+            await isSyncReady();
+            return await sharedService.proxy["updateMessage"]!(id, update);
+          },
         },
       },
     };

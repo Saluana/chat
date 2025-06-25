@@ -23,48 +23,89 @@
     </div>
 
     <!-- api key -->
-    <div
-      class="bg-white/80 dark:bg-neutral-900 rounded-lg p-4 mx-auto flex-2/3"
-    >
-      <div class="flex items-center gap-2 font-semibold">
-        <UIcon name="i-lucide:key" class="size-6" />
-        <p class="text-xl">API Key</p>
+    <div class="flex flex-col items-center gap-4 flex-2/3">
+      <div
+        class="bg-white/80 dark:bg-neutral-900 rounded-lg p-4 mx-auto w-full"
+      >
+        <div class="flex items-center gap-2">
+          <UIcon name="i-lucide:key" class="size-5" />
+          <p class="text-lg">OpenRouter API Key</p>
+        </div>
+
+        <div class="flex flex-col items-start justify-center mt-6">
+          <UInput
+            v-model="openRouterKey"
+            size="xl"
+            placeholder="Your API Key"
+            type="password"
+            class="w-full"
+            :ui="{
+              base: 'ring-neutral-600/50 focus-visible:ring-neutral-500/80',
+            }"
+          />
+          <p class="text-sm text-neutral-400 mt-1">
+            Get your key from
+            <NuxtLink
+              to="https://openrouter.ai/keys"
+              target="_blank"
+              external
+              class="text-primary-400 hover:text-primary-500"
+              >OpenRouter console </NuxtLink
+            >.
+          </p>
+
+          <UButton
+            size="lg"
+            color="primary"
+            variant="subtle"
+            label="Save"
+            class="ml-auto mt-5"
+            @click="saveApiKey('Open Router')"
+            :loading="savingOpenRouter"
+          />
+        </div>
       </div>
-      <p class="text-neutral-400 mt-1">
-        Bring your own 'OpenRouter' Key to use select models.
-      </p>
 
-      <div class="flex flex-col items-start justify-center mt-6">
-        <UInput
-          v-model="apiKey"
-          size="xl"
-          placeholder="Your API Key"
-          type="password"
-          class="w-full"
-          :ui="{
-            base: 'ring-neutral-600/50 focus-visible:ring-neutral-500/80',
-          }"
-        />
-        <p class="text-sm text-neutral-400 mt-1">
-          Get your key from
-          <NuxtLink
-            to="https://openrouter.ai/keys"
-            target="_blank"
-            external
-            class="text-primary-400 hover:text-primary-500"
-            >OpenRouter console </NuxtLink
-          >.
-        </p>
+      <div
+        class="bg-white/80 dark:bg-neutral-900 rounded-lg p-4 mx-auto w-full"
+      >
+        <div class="flex items-center gap-2">
+          <UIcon name="i-lucide:key" class="size-5" />
+          <p class="text-lg">Gemini API Key</p>
+        </div>
 
-        <UButton
-          size="lg"
-          color="primary"
-          variant="subtle"
-          label="Save"
-          class="ml-auto mt-5"
-          @click="saveApiKey"
-          :loading="saving"
-        />
+        <div class="flex flex-col items-start justify-center mt-6">
+          <UInput
+            v-model="geminiKey"
+            size="xl"
+            placeholder="Your API Key"
+            type="password"
+            class="w-full"
+            :ui="{
+              base: 'ring-neutral-600/50 focus-visible:ring-neutral-500/80',
+            }"
+          />
+          <p class="text-sm text-neutral-400 mt-1">
+            Get your key from
+            <NuxtLink
+              to="https://aistudio.google.com/app/apikey"
+              target="_blank"
+              external
+              class="text-primary-400 hover:text-primary-500"
+              >Gemini console </NuxtLink
+            >.
+          </p>
+
+          <UButton
+            size="lg"
+            color="primary"
+            variant="subtle"
+            label="Save"
+            class="ml-auto mt-5"
+            @click="saveApiKey('Gemini')"
+            :loading="savingGemini"
+          />
+        </div>
       </div>
     </div>
   </div>
@@ -75,44 +116,61 @@ const user = useAuth().sessionState;
 const name = computed(() => user.value.user?.name);
 const image = computed(() => user.value.user?.image);
 const email = computed(() => user.value.user?.email);
-const toast = useToast();
+import showToast from "~/utils/showToast";
 
 const { $sync } = useNuxtApp();
 const apiKey = ref("");
+const openRouterKey = ref("");
+const geminiKey = ref("");
 const saving = ref(false);
+const savingOpenRouter = ref(false);
+const savingGemini = ref(false);
 
 // Load the API key on mount
 onMounted(async () => {
   try {
-    const savedKey = await $sync.getKV("openrouter_api_key");
-    if (savedKey) {
-      apiKey.value = savedKey;
+    const savedOpenRouterKey = await $sync.getKV("openrouter_api_key");
+    const savedGeminiKey = await $sync.getKV("gemini_api_key");
+    if (savedOpenRouterKey) {
+      openRouterKey.value = savedOpenRouterKey;
+    }
+    if (savedGeminiKey) {
+      geminiKey.value = savedGeminiKey;
     }
   } catch (error) {
     console.error("Failed to load API key:", error);
   }
 });
 
-async function saveApiKey() {
-  if (!apiKey.value.trim()) {
-    return;
+async function saveApiKey(type: string) {
+  if (type === "Open Router") {
+    if (!openRouterKey.value.trim()) {
+      return;
+    } else {
+      savingOpenRouter.value = true;
+    }
   }
 
-  saving.value = true;
+  if (type === "Gemini") {
+    if (!geminiKey.value.trim()) {
+      return;
+    } else {
+      savingGemini.value = true;
+    }
+  }
+
+  const keyToSave =
+    type === "Open Router" ? openRouterKey.value : geminiKey.value;
+  const keyName =
+    type === "Open Router" ? "openrouter_api_key" : "gemini_api_key";
   try {
-    await $sync.setKV("openrouter_api_key", apiKey.value);
-    toast.add({
-      title: "Saved settings!",
-      icon: "i-lucide:check-circle",
-      duration: 2000,
-      close: {
-        class: "hidden",
-      },
-    });
+    await $sync.setKV(keyName, keyToSave);
+    showToast("Saved settings!");
   } catch (error) {
     console.error("Failed to save API key:", error);
   } finally {
-    saving.value = false;
+    savingOpenRouter.value = false;
+    savingGemini.value = false;
   }
 }
 </script>

@@ -1,5 +1,14 @@
 <template>
-  <div class="h-full flex flex-col relative">
+  <div v-if="!messagesList.length && currentThreadId">
+    <div
+      class="flex flex-col items-center justify-center min-h-screen text-center gap-5"
+    >
+      <h1 class="text-4xl font-bold">404 - Chat Not Found</h1>
+      <UButton label="New Chat" variant="subtle" size="lg" to="/" />
+    </div>
+  </div>
+
+  <div v-else class="h-full flex flex-col relative">
     <div
       class="overflow-y-auto flex-grow"
       ref="messagesContainer"
@@ -7,7 +16,7 @@
     >
       <UContainer
         class="max-w-4xl h-auto flex flex-col"
-        :class="[!currentThreadId ? 'mt-[200px]' : 'mt-0']"
+        :class="[!currentThreadId ? 'mt-[250px]' : 'mt-0']"
       >
         <div
           v-if="!currentThreadId"
@@ -26,7 +35,6 @@
 
           <ChatPrompt
             @send="sendMessage"
-            :messages="messagesList"
             @model-change="handleModelChange"
             @thinking-budget-change="handleThinkingBudgetChange"
           />
@@ -109,7 +117,6 @@
             v-for="(message, index) in messagesList"
             :key="index"
             :message="message"
-            :loading="loading"
             @retryMessage="() => retryMessage(message.id)"
             @branchThread="() => branchThread(message.id)"
           />
@@ -142,7 +149,6 @@
         <ChatPrompt
           :bottom="true"
           @send="sendMessage"
-          :messages="messagesList"
           @model-change="handleModelChange"
           @thinking-budget-change="handleThinkingBudgetChange"
         />
@@ -158,6 +164,7 @@ definePageMeta({
 
 const route = useRoute();
 const threadsStore = useThreadsStore();
+const promptStore = usePromptStore();
 const { $sync } = useNuxtApp();
 
 onMounted(async () => {
@@ -235,8 +242,6 @@ const selectPrompt = (prompt: any) => {
   selectedPrompt.value = prompt;
 };
 
-const loading = ref(false);
-
 watch(
   () => route.params.id,
   async (newId) => {
@@ -249,16 +254,16 @@ watch(
 const currentThreadId = computed(() => route.params.id?.toString() || "");
 
 // State for current model and thinking budget
-const currentModel = ref<any>({});
-const currentThinkingBudget = ref<string>();
+const { currentModel } = storeToRefs(promptStore);
+const { thinkingBudget } = storeToRefs(promptStore);
 
 // Handlers for model and thinking budget changes
 const handleModelChange = (model: any) => {
-  currentModel.value = model;
+  promptStore.setCurrentModel(model);
 };
 
 const handleThinkingBudgetChange = (budget: string) => {
-  currentThinkingBudget.value = budget;
+  promptStore.setThinkingBudget(budget);
 };
 
 // Update sendMessage to store messages in the store
@@ -272,8 +277,8 @@ const sendMessage = async (text: string) => {
   if (currentModel.value?.apiModel) {
     options.model = currentModel.value.apiModel;
   }
-  if (currentThinkingBudget.value && currentModel.value?.reasoningAbility) {
-    options.thinkingBudget = currentThinkingBudget.value;
+  if (thinkingBudget.value && currentModel.value?.reasoningAbility) {
+    options.thinkingBudget = thinkingBudget.value;
   }
 
   if (!currentThreadId) {
@@ -302,8 +307,8 @@ const retryMessage = async (messageId: string) => {
     if (currentModel.value?.apiModel) {
       options.model = currentModel.value.apiModel;
     }
-    if (currentThinkingBudget.value && currentModel.value?.reasoningAbility) {
-      options.thinkingBudget = currentThinkingBudget.value;
+    if (thinkingBudget.value && currentModel.value?.reasoningAbility) {
+      options.thinkingBudget = thinkingBudget.value;
     }
 
     await $sync.retryMessage(messageId, options);
@@ -329,16 +334,16 @@ onMounted(() => {
   updateChatPromptHeight();
 });
 
-// watch(
-//   messagesList,
-//   () => {
-//     nextTick(() => {
-//       handleScroll();
-//       updateChatPromptHeight();
-//     });
-//   },
-//   { deep: true },
-// );
+watch(
+  messagesList,
+  () => {
+    nextTick(() => {
+      handleScroll();
+      updateChatPromptHeight();
+    });
+  },
+  { deep: true },
+);
 
 const updateChatPromptHeight = () => {
   nextTick(() => {

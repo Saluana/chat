@@ -241,19 +241,13 @@ export function syncServiceProvider() {
           newClock,
           backendMessage.stream_id,
           backendMessage.index ?? 0,
-          backendMessage.thread_id, // Additional thread_id for WHERE clause
+          backendMessage.thread_id,
         ],
       );
 
       const changes = sqlite3.changes(db);
       if (changes > 0) {
-        const messagesInThread = await api.getMessagesForThread(
-          backendMessage.thread_id,
-        );
-        const updatedMessage = messagesInThread.find(
-          (m) => m.id === backendMessage.id,
-        );
-
+        const updatedMessage = await api.getMessage(backendMessage.id);
         if (updatedMessage) {
           const messageChannel = new BroadcastChannel(
             getMessageChannelName(backendMessage.thread_id),
@@ -465,11 +459,35 @@ export function syncServiceProvider() {
       await waitForDatabase();
       const { rows } = await sqlite3.execWithParams(
         db,
-        `SELECT ${THREAD_COLUMNS.join(", ")} FROM threads WHERE id = ? AND deleted = 0`,
+        `SELECT ${THREAD_COLUMNS.join(", ")} FROM threads WHERE id = ?`,
         [threadId],
       );
       const thread = rows[0] ? mapRowToThread(rows[0], THREAD_COLUMNS) : null;
       return thread;
+    },
+    async getMessage(messageId: string): Promise<any | null> {
+      await waitForDatabase();
+      const { rows } = await sqlite3.execWithParams(
+        db,
+        `SELECT id, role, content, data, created_at, updated_at, error, deleted, thread_id, clock, stream_id, message_index
+         FROM messages WHERE id = ?`,
+        [messageId],
+      );
+      const messages = rows.map((row) => ({
+        id: row[0],
+        role: row[1],
+        content: row[2],
+        data: row[3] ? JSON.parse(row[3]) : null,
+        created_at: Number(row[4]),
+        updated_at: Number(row[5]),
+        error: row[6],
+        deleted: !!row[7],
+        thread_id: row[8],
+        clock: row[9] !== null ? Number(row[9]) : undefined,
+        stream_id: row[10] || "",
+        index: row[11] !== null ? Number(row[11]) : 0,
+      }));
+      return messages[0];
     },
     async getThreads(): Promise<Thread[]> {
       await waitForDatabase();
@@ -552,8 +570,21 @@ export function syncServiceProvider() {
       };
       wsSendFunction?.(JSON.stringify(pushObj));
     },
-    async updateMessage() {
-      // edit message, delete message, retry (delete + run thread)
+    async updateMessage(id: string, update: { data?: any; deleted?: boolean }) {
+      await waitForSync();
+      const pushObj: PushEvent = {
+        id: crypto.randomUUID(),
+        events: [
+          {
+            type: "update_message",
+            data: {
+              id,
+              ...update,
+            },
+          },
+        ],
+      };
+      wsSendFunction?.(JSON.stringify(pushObj));
     },
     async retryMessage(
       messageId: string,

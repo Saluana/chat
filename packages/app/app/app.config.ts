@@ -22,9 +22,7 @@ export default defineAppConfig({
     toast: {
       slots: {
         progress: "hidden",
-        title: "text-primary-800 dark:text-primary-200",
-        icon: "text-primary-800! dark:text-primary-200!",
-        root: "bg-primary-100 dark:bg-primary-950",
+        root: "bg-gray-100 dark:bg-neutral-900",
       },
     },
   },

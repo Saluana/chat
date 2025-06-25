@@ -14,7 +14,7 @@
           Nuxflare Chat
         </h1>
         <p class="text-neutral-900 dark:text-neutral-400">
-          Sign In and chat with powerful AI models in one place.
+          Sign in and chat with powerful AI models in one place.
         </p>
       </div>
 

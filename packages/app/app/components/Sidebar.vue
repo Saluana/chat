@@ -130,7 +130,6 @@ const actions = [
     icon: "i-hugeicons:logout-05",
     name: "Logout",
     action: async () => {
-      // Implement help action
       await useSession().clear();
       navigateTo("/login");
     },

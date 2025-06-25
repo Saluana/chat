@@ -92,6 +92,7 @@
     <div class="absolute z-[10] top-4 right-4 floating-actions">
       <ColorModeToggle />
       <UModal
+        :overlay="false"
         v-model:open="settingsRef"
         :ui="{
           content: 'bg-transparent',

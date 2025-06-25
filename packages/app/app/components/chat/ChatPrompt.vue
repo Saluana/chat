@@ -6,11 +6,11 @@
     <div class="p-2 px-3 rounded-t-xl w-full h-full">
       <!-- Selected files preview -->
       <div
-        v-if="selectedFiles.length > 0"
+        v-if="attachmentFiles.length > 0"
         class="mb-3 flex overflow-x-auto py-2 gap-3 scrollbar-custom"
       >
         <div
-          v-for="(file, index) in selectedFiles"
+          v-for="(file, index) in attachmentFiles"
           :key="index"
           class="relative flex-shrink-0"
         >
@@ -48,7 +48,7 @@
       </div>
 
       <UTextarea
-        v-model="input"
+        v-model="message"
         autoresize
         :maxrows="8"
         placeholder="Type your message here..."
@@ -63,21 +63,21 @@
           <ModelSelector @changeModel="changeModel" />
 
           <ReasoningBudget
-            v-if="selectedModel.reasoningAbility"
+            v-if="currentModel.reasoningAbility"
             @changeBudget="changeBudget"
           />
 
           <UButton
-            v-if="selectedModel.webSearch"
+            v-if="currentModel.webSearch"
             @click="toggleWebSearch"
             variant="subtle"
             icon="i-heroicons:globe-alt"
             label="Search"
             size="sm"
-            :color="webSearchSelected ? 'primary' : 'neutral'"
+            :color="webSearch ? 'primary' : 'neutral'"
             class="chat-prompt-icons"
             :class="[
-              webSearchSelected
+              webSearch
                 ? 'text-neutral-800! dark:text-white! bg-primary-400/20 dark:bg-primary-500/20'
                 : '',
             ]"
@@ -96,12 +96,15 @@
         </div>
 
         <div></div>
-        <UTooltip :disabled="!!input.trim()" text="Message requires text">
+        <UTooltip
+          :disabled="!!message.trim() || responseStreaming"
+          text="Message requires text"
+        >
           <UButton
             @click="handleSubmit"
             variant="subtle"
             icon="i-lucide:arrow-up"
-            :disabled="!input.trim()"
+            :disabled="!message.trim() || responseStreaming"
             size="md"
             :ui="{
               base: 'disabled:bg-primary-500/50 disabled:dark:bg-primary-400/20 bg-primary-800/80 hover:bg-primary-800/70 dark:bg-primary-700/30 hover:dark:bg-primary-700/20 disabled:dark:text-white/40 text-white/80',
@@ -124,52 +127,39 @@
 </template>
 
 <script setup lang="ts">
-const { input } = useTextareaAutosize();
+const promptStore = usePromptStore();
+const { message } = storeToRefs(promptStore);
+const { responseStreaming } = storeToRefs(promptStore);
 const emit = defineEmits(["send", "model-change", "thinking-budget-change"]);
 
 const handleSubmit = () => {
-  if (input.value.trim()) {
-    emit("send", input.value);
-    input.value = "";
+  if (message.value.trim()) {
+    emit("send", message.value);
+    promptStore.resetMessage();
   }
 };
 
 const props = defineProps({
-  messages: {
-    type: Array,
-    default: () => [],
-  },
   bottom: {
     type: Boolean,
     default: () => false,
   },
 });
 
-const attachmentTooltip = ref("Add an attachment");
-const selectedModel = ref<any>({});
-const webSearchSelected = ref(false);
+const { attachmentTooltip } = storeToRefs(promptStore);
+const { currentModel } = storeToRefs(promptStore);
+const { webSearch } = storeToRefs(promptStore);
 
 const changeModel = (model: any) => {
-  if (!model.webSearch) webSearchSelected.value = false;
+  if (!model.webSearch) promptStore.toggleWebSearch();
   if (
-    !model.imageUploads === selectedModel.value.imageUploads ||
-    !model.pdfUploads === selectedModel.value.pdfUploads
+    !model.imageUploads === currentModel.value.imageUploads ||
+    !model.pdfUploads === currentModel.value.pdfUploads
   ) {
-    selectedFiles.value = [];
+    promptStore.clearAttachmentFiles();
   }
-  selectedModel.value = model;
   emit("model-change", model);
-  if (model.imageUploads && model.pdfUploads) {
-    attachmentTooltip.value =
-      "Add an attachment\nAccepts: Text, PNG, JPEG, GIF, PDF";
-  } else if (model.imageUploads) {
-    attachmentTooltip.value =
-      "Add an attachment\nAccepts: Text, PNG, JPEG, GIF";
-  } else if (model.pdfUploads) {
-    attachmentTooltip.value = "Add an attachment\nAccepts: Text, PDF";
-  } else {
-    attachmentTooltip.value = `Add an attachment\nAccepts: Text`;
-  }
+  promptStore.setAttachmentTooltip();
 };
 
 const changeBudget = (budget: string) => {
@@ -177,7 +167,7 @@ const changeBudget = (budget: string) => {
 };
 
 const fileInput = ref<HTMLInputElement>();
-const selectedFiles = ref<File[]>([]);
+const { attachmentFiles } = storeToRefs(promptStore);
 
 const openFileExplorer = () => {
   fileInput.value?.click();
@@ -186,7 +176,7 @@ const openFileExplorer = () => {
 const handleFileSelection = (event: Event) => {
   const files = (event.target as HTMLInputElement).files;
   if (files && files.length > 0) {
-    selectedFiles.value.push(...Array.from(files));
+    promptStore.setAttachmentFiles(files);
     // Reset the input value to allow selecting the same file again
     (event.target as HTMLInputElement).value = "";
   }
@@ -197,11 +187,11 @@ const getImagePreview = (file: File) => {
 };
 
 const removeFile = (index: number) => {
-  selectedFiles.value.splice(index, 1);
+  promptStore.removeAttachmentFile(index);
 };
 
 const getAcceptedFileTypes = () => {
-  const model = selectedModel.value as any;
+  const model = currentModel.value as any;
   let types = ["text/*"];
 
   if (model.imageUploads) {
@@ -216,6 +206,6 @@ const getAcceptedFileTypes = () => {
 };
 
 const toggleWebSearch = () => {
-  webSearchSelected.value = !webSearchSelected.value;
+  promptStore.toggleWebSearch();
 };
 </script>

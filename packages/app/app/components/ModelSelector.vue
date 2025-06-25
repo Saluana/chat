@@ -1,8 +1,7 @@
 <template>
   <USelectMenu
-    v-model="selectedModel"
+    v-model="currentModel"
     :searchInput="false"
-    valueKey="label"
     color="neutral"
     variant="ghost"
     :items="models"
@@ -39,7 +38,8 @@
 </template>
 
 <script setup lang="ts">
-const selectedModel = ref("Gemini 2.5 Flash");
+const promptStore = usePromptStore();
+const { currentModel } = storeToRefs(promptStore);
 
 const icons = ref([
   {
@@ -84,7 +84,7 @@ const icons = ref([
   },
 ]);
 
-const models = ref([
+const models = [
   {
     label: "Gemini 2.5 Flash",
     apiModel: "google/gemini-2.5-flash",
@@ -140,15 +140,15 @@ const models = ref([
     generateImage: false,
   },
   {
-    label: "Meta: Llama 3.3 8B Instruct (free)",
-    apiModel: "meta-llama/llama-3.3-8b-instruct:free",
+    label: "Gemini 2.0 Flash Experimental (free)",
+    apiModel: "google/gemini-2.0-flash-exp:free",
     imageUploads: false,
     webSearch: false,
     pdfUploads: false,
     reasoningAbility: false,
     generateImage: false,
   },
-]);
+];
 
 const getModelIcons = (model: any) => {
   return icons.value.filter((icon) => model[icon.ability]);
@@ -156,18 +156,9 @@ const getModelIcons = (model: any) => {
 
 const emit = defineEmits(["changeModel"]);
 const changeModel = (model: string) => {
-  const newModel = models.value.find((m) => m.label === model);
+  const newModel = models.find((m) => m.label === model);
   if (newModel) {
     emit("changeModel", newModel);
   }
 };
-
-onMounted(() => {
-  const initialModel = models.value.find(
-    (m) => m.label === selectedModel.value,
-  );
-  if (initialModel) {
-    emit("changeModel", initialModel);
-  }
-});
 </script>

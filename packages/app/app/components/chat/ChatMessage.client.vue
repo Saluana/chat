@@ -8,18 +8,18 @@
           class="max-w-[80%] flex p-3 rounded-lg ring-1 ring-primary-400/30 dark:ring-0 bg-primary-100/50 dark:bg-neutral-500/20"
         >
           <div class="flex flex-col text-md">
-            <vue-markdown
-              class="prose dark:prose-invert"
-              :source="message.content"
-            />
+            <RenderMessage :content="message.content" />
           </div>
         </div>
 
         <div
           v-if="editUserMessage"
-          class="w-full max-w-[80%] flex p-3 rounded-lg ring-0 dark:ring-0 bg-primary-100/50 dark:bg-neutral-700/20 shadow-[inset_0_0px_5px_rgba(42,71,189)] dark:shadow-[inset_0_0px_5px_rgba(140,140,140)]"
+          class="w-full max-w-[80%] flex p-3 rounded-lg bg-primary-100/40 dark:bg-neutral-800/50 ring-2 ring-primary-300/50 dark:ring-neutral-200/20"
         >
-          <UInput
+          <UTextarea
+            :rows="1"
+            :maxrows="8"
+            autoresize
             :id="`message-input`"
             v-model="editedMessageContent"
             class="w-full"
@@ -27,7 +27,7 @@
               base: 'p-0 pb-0.5 ring-0 focus-visible:ring-0 rounded-none bg-transparent',
               root: '',
             }"
-            @keydown.enter="saveMessage($event)"
+            @keydown.enter.exact.prevent="saveMessage()"
             @update:model-value="updateUserMessage($event)"
           />
         </div>
@@ -45,7 +45,7 @@
               variant="ghost"
               size="sm"
               :icon="actionItem.icon"
-              :color="actionItem.color || 'neutral'"
+              :color="(actionItem.color as any) || 'neutral'"
               class="hover:bg-primary-100/50 dark:hover:bg-primary-400/10"
               @click="actionItem.action"
             />
@@ -63,10 +63,10 @@
             v-if="message.stream_id"
             :stream-id="message.stream_id"
           />
-          <vue-markdown
-            class="prose dark:prose-invert"
-            v-else
-            :source="message.content"
+          <RenderMessage :content="message.content" />
+          <AssistantErrorMessage
+            v-if="message.error"
+            :message="message?.error"
           />
         </div>
         <WebSearch v-if="message.webSearch" :content="message.webSearch" />
@@ -81,6 +81,7 @@
             :text="actionItem.tooltip"
           >
             <UButton
+              v-if="actionItem"
               variant="ghost"
               size="sm"
               :icon="actionItem.icon"
@@ -93,7 +94,6 @@
       </div>
     </div>
 
-    <VueSpinnerDots v-if="loading" class="w-10 my-10" />
     <DeleteModal
       v-model="openDeleteModal"
       @cancelDelete="cancelDelete"
@@ -103,12 +103,10 @@
 </template>
 
 <script setup lang="ts">
-import { VueSpinnerDots } from "vue3-spinners";
-import VueMarkdown from "vue-markdown-render";
+import showToast from "~/utils/showToast";
 
 interface ChatMessageProps {
   message: any;
-  loading: boolean;
   showTimestamp?: boolean;
 }
 
@@ -116,12 +114,13 @@ const props = withDefaults(defineProps<ChatMessageProps>(), {
   showTimestamp: false,
 });
 const emit = defineEmits(["retryMessage", "branchThread"]);
+const { $sync } = useNuxtApp();
 
 const editUserMessage = ref(false);
-const editedMessageContent = ref("");
+const { input: editedMessageContent } = useTextareaAutosize();
 const copiedState = ref(false);
 
-const editMessage = (message) => {
+const editMessage = (message: any) => {
   editUserMessage.value = !editUserMessage.value;
   if (editUserMessage.value) {
     editedMessageContent.value = message.content;
@@ -132,30 +131,47 @@ const editMessage = (message) => {
   }
 };
 
-const saveMessage = (event) => {
-  props.message.content =
-    editedMessageContent.value.trim() || props.message.content;
+const saveMessage = async () => {
+  const newContent = editedMessageContent.value.trim();
+  if (newContent && newContent !== props.message.content) {
+    try {
+      await $sync.updateMessage(props.message.id, {
+        data: { content: newContent },
+      });
+      showToast("Message updated successfully");
+    } catch (error) {
+      showToast("Failed to update message", "error");
+    }
+  }
   editUserMessage.value = false;
-  //logic to send the new message
 };
 
-const updateUserMessage = (event) => {
-  //logic to update the user message
+const updateUserMessage = (event: any) => {
   editedMessageContent.value = event.target.value;
 };
-
-const toast = useToast();
 
 const openDeleteModal = ref(false);
 
 const userMessageActions = computed(() => [
   {
-    icon: "i-lucide:edit",
-    tooltip: "Edit message",
+    icon: editUserMessage.value ? "i-lucide:check" : "i-lucide:edit",
+    tooltip: editUserMessage.value ? "Save changes" : "Edit message",
     action: () => {
-      editMessage(props.message);
+      editUserMessage.value ? saveMessage() : editMessage(props.message);
     },
   },
+  ...(editUserMessage.value
+    ? [
+        {
+          icon: "i-lineicons:xmark",
+          tooltip: "Cancel edit",
+          action: () => {
+            editUserMessage.value = false;
+            editedMessageContent.value = "";
+          },
+        },
+      ]
+    : []),
   {
     icon: "carbon:branch",
     tooltip: "Branch off",
@@ -168,32 +184,16 @@ const userMessageActions = computed(() => [
     tooltip: "Copy message",
     color: copiedState.value ? "success" : "neutral",
     action: async () => {
-      if (copiedState.value) return; // Disable copying while check icon is shown
-
+      if (copiedState.value) return;
       try {
         await navigator.clipboard.writeText(props.message.content);
         copiedState.value = true;
         setTimeout(() => {
           copiedState.value = false;
         }, 2000);
-        toast.add({
-          title: "Copied to clipboard",
-          icon: "i-lucide:check-circle",
-          duration: 2000,
-          close: {
-            class: "hidden",
-          },
-        });
+        showToast("Copied to clipboard");
       } catch (error) {
-        toast.add({
-          title: "Failed to copy to clipboard",
-          icon: "i-lucide:x-circle",
-          color: "red",
-          duration: 2000,
-          close: {
-            class: "hidden",
-          },
-        });
+        showToast("Failed to copy to clipboard", "error");
       }
     },
   },
@@ -214,44 +214,29 @@ const assistantMessageActions = computed(() => [
       emit("branchThread", props.message.id);
     },
   },
-  {
-    icon: "i-lucide:refresh-ccw",
-    tooltip: "Retry message",
-    action: () => {
-      emit("retryMessage");
+  props.message &&
+    !props.message.stream_id && {
+      icon: "i-lucide:refresh-ccw",
+      tooltip: "Retry message",
+      action: () => {
+        emit("retryMessage");
+      },
     },
-  },
   {
     icon: copiedState.value ? "i-lucide:check" : "i-lucide:copy",
     tooltip: "Copy message",
     color: copiedState.value ? "success" : "neutral",
     action: async () => {
-      if (copiedState.value) return; // Disable copying while check icon is shown
-
+      if (copiedState.value) return;
       try {
         await navigator.clipboard.writeText(props.message.content);
         copiedState.value = true;
         setTimeout(() => {
           copiedState.value = false;
         }, 2000);
-        toast.add({
-          title: "Copied to clipboard",
-          icon: "i-lucide:check-circle",
-          duration: 2000,
-          close: {
-            class: "hidden",
-          },
-        });
+        showToast("Copied to clipboard");
       } catch (error) {
-        toast.add({
-          title: "Failed to copy to clipboard",
-          icon: "i-lucide:x-circle",
-          color: "red",
-          duration: 2000,
-          close: {
-            class: "hidden",
-          },
-        });
+        showToast("Failed to copy to clipboard", "error");
       }
     },
   },
@@ -266,13 +251,15 @@ const assistantMessageActions = computed(() => [
 
 const cancelDelete = () => {
   openDeleteModal.value = false;
-  threadToDelete.value = null;
 };
 
-const confirmDelete = () => {
-  // delete logic here
-  console.log("Deleting thread:", threadToDelete.value);
+const confirmDelete = async () => {
+  try {
+    await $sync.updateMessage(props.message.id, { deleted: true });
+    showToast("Message deleted successfully");
+  } catch (error) {
+    showToast("Failed to delete message", "error");
+  }
   openDeleteModal.value = false;
-  threadToDelete.value = null;
 };
 </script>

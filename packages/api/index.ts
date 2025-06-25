@@ -131,6 +131,7 @@ export class User extends DurableObject {
 
   async #processEvents(events: PushEvent["events"]) {
     const syncEvents: SyncEvent[] = [];
+    console.log("events", events);
     try {
       for (const event of events) {
         if (event.type === "new_thread") {
@@ -647,9 +648,9 @@ export class Stream extends DurableObject {
       const streamConfig: any = {
         model: openrouter(model),
         messages,
+        onError: console.log,
       };
 
-      // Add reasoning configuration if thinking budget is specified
       if (options.thinkingBudget) {
         streamConfig.reasoning = {
           effort: options.thinkingBudget, // "low", "medium", or "high"
@@ -657,7 +658,7 @@ export class Stream extends DurableObject {
       }
 
       const res = streamText(streamConfig);
-      const { textStream } = res;
+      const { textStream, response, warnings } = res;
       for await (const part of textStream) {
         this.response += part;
         for (const controller of this.activeStreams) {
@@ -676,6 +677,8 @@ export class Stream extends DurableObject {
         }
       }
       this.activeStreams = [];
+      response.then(console.log);
+      warnings.then(console.log);
       this.done = true;
     } catch (error) {
       console.error("Stream error:", error);

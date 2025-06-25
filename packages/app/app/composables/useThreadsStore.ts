@@ -113,9 +113,8 @@ export const useThreadsStore = defineStore("threads", () => {
         const { type, payload } = event.data;
         if (type === "message_update") {
           if (payload.thread_id !== activeThread.value) return;
-          messages.value[payload.id] = payload;
-        } else if (type === "message_delete") {
-          // TODO: what?
+          if (payload.deleted) delete messages.value[payload.id];
+          else messages.value[payload.id] = payload;
         }
       };
     }
@@ -165,10 +164,8 @@ export const useThreadsStore = defineStore("threads", () => {
       const { type, payload } = event.data as { type: string; payload: any };
       if (type === "thread_update") {
         const thread = payload as Thread;
-        setThread(thread);
-      } else if (type === "thread_delete") {
-        // Assuming payload is { id: string } for delete
-        removeThread(payload.id);
+        if (thread.deleted) removeThread(thread.id);
+        else setThread(thread);
       }
     };
 
