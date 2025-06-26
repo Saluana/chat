@@ -1,7 +1,7 @@
 <template>
   <div>
     <VueSpinnerDots v-if="!(content.length > 0)" class="w-10" />
-    <RenderMessage :content="content" />
+    <MarkdownRenderer :content="content" />
   </div>
 </template>
 

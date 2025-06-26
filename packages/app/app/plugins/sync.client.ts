@@ -62,9 +62,9 @@ export default defineNuxtPlugin({
             return await sharedService.proxy["setAuthInfo"]!(endpoint, token);
           },
           async newThread(params: {
-            messageContent: string;
-            model: string;
-            thinkingBudget: string;
+            content: string;
+            attachments?: any[];
+            options: { name: string; thinkingBudget: string };
           }) {
             await isSyncReady();
             return await sharedService.proxy["newThread"]!(params);
@@ -81,13 +81,14 @@ export default defineNuxtPlugin({
             await isSyncReady();
             return await sharedService.proxy["updateThread"]!(id, update);
           },
-          async sendMessage(threadId: string, message: any, options: any) {
+          async sendMessage(params: {
+            threadId: string;
+            content: string;
+            attachments?: any[];
+            options: { name: string; thinkingBudget: string };
+          }) {
             await isSyncReady();
-            return await sharedService.proxy["sendMessage"]!(
-              threadId,
-              message,
-              options,
-            );
+            return await sharedService.proxy["sendMessage"]!(params);
           },
           async getKV(name: string) {
             await isSyncReady();

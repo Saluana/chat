@@ -14,6 +14,10 @@ class_name = "Stream"
 tag = "v1"
 new_sqlite_classes = ["User", "Stream"]
 
+[[r2_buckets]]
+binding = "BLOB"
+bucket_name = "blobs"
+
 [[rules]] 
 type = "Text"
 globs = ["**/*.sql"]

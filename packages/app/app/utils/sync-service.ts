@@ -411,16 +411,16 @@ export function syncServiceProvider() {
       }
     },
     async newThread(params: {
-      messageContent: string;
+      content: string;
+      attachments?: any[];
       title?: string;
-      model?: string;
-      thinkingBudget?: string;
+      options?: { name: string; thinkingBudget?: string };
     }) {
       await waitForSync();
       const threadId = crypto.randomUUID();
       const messageId = crypto.randomUUID();
       const title =
-        params.title || params.messageContent.substring(0, 50) || "New Chat";
+        params.title || params.content.substring(0, 50) || "New Chat";
       const pushObj: PushEvent = {
         id: crypto.randomUUID(),
         events: [
@@ -435,7 +435,10 @@ export function syncServiceProvider() {
             type: "new_message",
             data: {
               id: messageId,
-              data: { content: params.messageContent },
+              data: {
+                content: params.content,
+                attachments: params.attachments,
+              },
               role: "user",
               threadId,
             },
@@ -444,10 +447,7 @@ export function syncServiceProvider() {
             type: "run_thread",
             data: {
               threadId,
-              options: {
-                model: params.model,
-                thinkingBudget: params.thinkingBudget,
-              },
+              options: params.options,
             },
           },
         ],
@@ -541,11 +541,12 @@ export function syncServiceProvider() {
       };
       wsSendFunction?.(JSON.stringify(pushObj));
     },
-    async sendMessage(
-      threadId: string,
-      message: any,
-      options?: { model?: string; thinkingBudget?: string },
-    ) {
+    async sendMessage(params: {
+      threadId: string;
+      content: string;
+      attachments?: any[];
+      options?: { model: string; thinkingBudget?: string };
+    }) {
       await waitForSync();
       const pushObj: PushEvent = {
         id: crypto.randomUUID(),
@@ -554,16 +555,19 @@ export function syncServiceProvider() {
             type: "new_message",
             data: {
               id: crypto.randomUUID(),
-              threadId,
-              data: message,
+              threadId: params.threadId,
+              data: {
+                content: params.content,
+                attachments: params.attachments,
+              },
               role: "user",
             },
           },
           {
             type: "run_thread",
             data: {
-              threadId,
-              options: options || {},
+              threadId: params.threadId,
+              options: params.options,
             },
           },
         ],
@@ -588,7 +592,7 @@ export function syncServiceProvider() {
     },
     async retryMessage(
       messageId: string,
-      options?: { model?: string; thinkingBudget?: string },
+      options?: { name: string; thinkingBudget?: string },
     ) {
       await waitForSync();
 
@@ -612,8 +616,8 @@ export function syncServiceProvider() {
             type: "run_thread",
             data: {
               threadId,
-              messageId, // Pass the messageId to update the existing message
-              options: options || {},
+              messageId,
+              options: options,
             },
           },
         ],

@@ -19,11 +19,40 @@ export const UpdateThreadSchema = v.object({
   }),
 });
 
+const ModelOptionsSchema = v.object({
+  name: v.string(),
+  thinkingBudget: v.optional(v.picklist(["low", "medium", "high"])),
+  webSearch: v.optional(v.boolean()),
+});
+
+const MessageDataSchema = v.object({
+  content: v.string(),
+
+  // for assistant messages, we store what model and options were used to generate the message.
+  modelOptions: v.optional(ModelOptionsSchema),
+
+  // for user messages, images/pdfs attached to the message
+  attachments: v.optional(
+    v.array(
+      v.object({
+        id: v.string(),
+        name: v.string(),
+        type: v.picklist([
+          "image/jpeg",
+          "image/png",
+          "image/webp",
+          "application/pdf",
+        ]),
+      }),
+    ),
+  ),
+});
+
 export const NewMessageSchema = v.object({
   type: v.literal("new_message"),
   data: v.object({
     id: v.string(),
-    data: v.any(),
+    data: MessageDataSchema,
     role: v.picklist(["user", "assistant", "system"]),
     threadId: v.string(),
   }),
@@ -32,10 +61,8 @@ export const NewMessageSchema = v.object({
 export const UpdateMessageSchema = v.object({
   type: v.literal("update_message"),
   data: v.object({
-    // TODO: we might need some internal validation for data here
-    // but that's for the handler, can't do it in schema
     id: v.string(),
-    data: v.optional(v.any()),
+    data: v.partial(MessageDataSchema),
     deleted: v.optional(v.boolean()),
   }),
 });
@@ -45,7 +72,7 @@ export const RunThreadSchema = v.object({
   data: v.object({
     threadId: v.string(),
     messageId: v.optional(v.string()),
-    options: v.any(),
+    options: v.optional(v.partial(ModelOptionsSchema)),
   }),
 });
 

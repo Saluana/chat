@@ -8,7 +8,7 @@
           class="max-w-[80%] flex p-3 rounded-lg ring-1 ring-primary-400/30 dark:ring-0 bg-primary-100/50 dark:bg-neutral-500/20"
         >
           <div class="flex flex-col text-md">
-            <RenderMessage :content="message.content" />
+            <MarkdownRenderer :content="message.content" />
           </div>
         </div>
 
@@ -63,7 +63,7 @@
             v-if="message.stream_id"
             :stream-id="message.stream_id"
           />
-          <RenderMessage :content="message.content" />
+          <MarkdownRenderer :content="message.content" />
           <AssistantErrorMessage
             :error="message.error"
             v-if="!message.stream_id && message.error"

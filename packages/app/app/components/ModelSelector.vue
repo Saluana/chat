@@ -104,6 +104,15 @@ const models = [
     generateImage: false,
   },
   {
+    label: "Gemini 2.0 Flash Experimental (free)",
+    apiModel: "google/gemini-2.0-flash-exp:free",
+    imageUploads: true,
+    webSearch: false,
+    pdfUploads: true,
+    reasoningAbility: false,
+    generateImage: false,
+  },
+  {
     label: "o4 mini",
     apiModel: "openai/o4-mini",
     imageUploads: true,
@@ -137,15 +146,6 @@ const models = [
     webSearch: false,
     pdfUploads: false,
     reasoningAbility: true,
-    generateImage: false,
-  },
-  {
-    label: "Gemini 2.0 Flash Experimental (free)",
-    apiModel: "google/gemini-2.0-flash-exp:free",
-    imageUploads: false,
-    webSearch: false,
-    pdfUploads: false,
-    reasoningAbility: false,
     generateImage: false,
   },
 ];

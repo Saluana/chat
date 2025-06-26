@@ -1,9 +1,3 @@
-# sst
-.sst
-
-# nuxflare
-.nuxflare
-
 # tmp files
 .#*
 
@@ -38,3 +32,6 @@ logs
 
 # wrangler
 .wrangler
+
+# alchemy
+.alchemy

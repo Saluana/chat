@@ -18,7 +18,6 @@
     "@pinia/nuxt": "0.11.1",
     "@tailwindcss/typography": "^0.5.16",
     "@vueuse/nuxt": "13.3.0",
-    "marked": "^15.0.12",
     "micromark": "^4.0.2",
     "nuxt": "3.17.5",
     "nuxt-svgo": "4.0.17",

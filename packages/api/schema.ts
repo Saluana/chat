@@ -13,7 +13,7 @@ export const threads = sqliteTable("threads", {
     .$onUpdate(() => sql`(unixepoch())`),
   last_message_at: int("last_message_at"),
   parent_thread_id: text("parent_thread_id"),
-  status: text("status").notNull().default("ready"), // 'ready', 'streaming', 'error'
+  status: text("status").notNull().default("ready"),
   deleted: int("deleted", { mode: "boolean" }).notNull().default(false),
   pinned: int("pinned", { mode: "boolean" }).notNull().default(false),
   clock: int("clock").notNull(),
@@ -22,7 +22,7 @@ export const threads = sqliteTable("threads", {
 export const messages = sqliteTable("messages", {
   id: text("id").notNull().primaryKey(),
   data: text("data", { mode: "json" }),
-  role: text("role").notNull(), // 'user', 'assistant', 'system'
+  role: text("role").notNull(),
   created_at: int("created_at")
     .notNull()
     .default(sql`(unixepoch())`),

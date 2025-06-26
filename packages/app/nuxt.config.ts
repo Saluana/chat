@@ -6,11 +6,11 @@ export default defineNuxtConfig({
     compatibilityVersion: 4,
   },
   build: {
-    transpile: ["wa-sqlite", "estree-walker", "micromark/debug"],
+    transpile: ["wa-sqlite", "estree-walker"],
   },
   vite: {
     optimizeDeps: {
-      exclude: ["wa-sqlite", "estree-walker", "micromark/debug"],
+      exclude: ["wa-sqlite", "estree-walker"],
     },
   },
   modules: [

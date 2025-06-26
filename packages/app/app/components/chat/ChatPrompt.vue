@@ -1,6 +1,6 @@
 <template>
   <div
-    class="backdrop-blur-md bg-neutral-200/40 dark:bg-neutral-800/50 ring-neutral-300/80 dark:ring-neutral-200/20"
+    class="backdrop-blur-md bg-neutral-100/80 dark:bg-neutral-800/60 ring-neutral-300/80 dark:ring-neutral-200/20"
     :class="[!bottom ? 'rounded-xl ring-1' : 'rounded-t-xl ring-2']"
   >
     <div class="p-2 px-3 rounded-t-xl w-full h-full">
@@ -84,14 +84,16 @@
           />
 
           <UTooltip :text="attachmentTooltip">
-            <UButton
-              @click="openFileExplorer"
-              variant="subtle"
-              icon="i-iconoir:attachment"
-              size="sm"
-              color="neutral"
-              class="chat-prompt-icons"
-            />
+            <div>
+              <UButton
+                @click="openFileExplorer"
+                variant="subtle"
+                icon="i-iconoir:attachment"
+                size="sm"
+                color="neutral"
+                class="chat-prompt-icons"
+              />
+            </div>
           </UTooltip>
         </div>
 
@@ -121,7 +123,7 @@
       multiple
       class="hidden"
       @change="handleFileSelection"
-      :accept="getAcceptedFileTypes()"
+      :accept="acceptedFileTypes"
     />
   </div>
 </template>
@@ -139,7 +141,7 @@ const handleSubmit = () => {
   }
 };
 
-const props = defineProps({
+const { bottom } = defineProps({
   bottom: {
     type: Boolean,
     default: () => false,
@@ -176,8 +178,7 @@ const openFileExplorer = () => {
 const handleFileSelection = (event: Event) => {
   const files = (event.target as HTMLInputElement).files;
   if (files && files.length > 0) {
-    promptStore.setAttachmentFiles(files);
-    // Reset the input value to allow selecting the same file again
+    [...files].forEach((file) => promptStore.addAttachmentFile(file));
     (event.target as HTMLInputElement).value = "";
   }
 };
@@ -190,20 +191,17 @@ const removeFile = (index: number) => {
   promptStore.removeAttachmentFile(index);
 };
 
-const getAcceptedFileTypes = () => {
+const acceptedFileTypes = computed(() => {
   const model = currentModel.value as any;
-  let types = ["text/*"];
-
+  const types = ["text/*"];
   if (model.imageUploads) {
-    types.push("image/png", "image/jpeg", "image/gif");
+    types.push("image/png", "image/jpeg", "image/webp");
   }
-
   if (model.pdfUploads) {
     types.push("application/pdf");
   }
-
   return types.join(",");
-};
+});
 
 const toggleWebSearch = () => {
   promptStore.toggleWebSearch();

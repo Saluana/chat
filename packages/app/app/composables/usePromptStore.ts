@@ -78,10 +78,6 @@ export const usePromptStore = defineStore("prompt", () => {
     }
   }
 
-  function resetAttachmentTooltip() {
-    attachmentTooltip.value = "Add an attachment";
-  }
-
   const init = () => {
     setAttachmentTooltip();
   };
@@ -106,7 +102,6 @@ export const usePromptStore = defineStore("prompt", () => {
     removeAttachmentFile,
     clearAttachmentFiles,
     setAttachmentTooltip,
-    resetAttachmentTooltip,
     toggleResponseStreaming,
   };
 });

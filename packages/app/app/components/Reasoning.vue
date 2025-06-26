@@ -2,14 +2,16 @@
   <UAccordion
     :items="items"
     :ui="{
-      content: 'p-3 rounded-lg bg-white dark:bg-neutral-800',
+      root: 'rounded-lg px-2 bg-neutral-100 dark:bg-neutral-800',
+      content: 'px-2',
       body: 'text-md',
       trigger: 'cursor-pointer relative',
-      trailingIcon: 'absolute left-0',
+      trailingIcon:
+        'group-data-[state=open]:rotate-0 group-data-[state=closed]:-rotate-90 absolute left-0',
     }"
   >
     <template #default="{ item }">
-      <p class="text-[15px] font-semibold ml-8">{{ item.label }}</p>
+      <p class="text-[15px] font-medium ml-8">{{ item.label }}</p>
     </template>
   </UAccordion>
 </template>
@@ -20,7 +22,6 @@ interface Props {
   content: string;
 }
 const props = defineProps<Props>();
-const open = ref(false);
 const items = ref<AccordionItem[]>([
   {
     label: "Reasoning",

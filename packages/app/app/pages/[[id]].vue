@@ -253,11 +253,9 @@ watch(
 
 const currentThreadId = computed(() => route.params.id?.toString() || "");
 
-// State for current model and thinking budget
-const { currentModel } = storeToRefs(promptStore);
-const { thinkingBudget } = storeToRefs(promptStore);
+const { currentModel, thinkingBudget, attachmentFiles } =
+  storeToRefs(promptStore);
 
-// Handlers for model and thinking budget changes
 const handleModelChange = (model: any) => {
   promptStore.setCurrentModel(model);
 };
@@ -266,43 +264,69 @@ const handleThinkingBudgetChange = (budget: string) => {
   promptStore.setThinkingBudget(budget);
 };
 
-// Update sendMessage to store messages in the store
+const sendingMessage = ref(false);
 const sendMessage = async (text: string) => {
+  sendingMessage.value = true;
+
+  const attachments = await (async () => {
+    const uploadedAttachments = [];
+    if (attachmentFiles.value.length) {
+      for (const file of attachmentFiles.value) {
+        const response = await fetch(
+          `${useRuntimeConfig().public.apiUrl}/blob`,
+          {
+            method: "PUT",
+            headers: {
+              Authentication: `Bearer ${getAccessToken()}`,
+              "content-type": file.type,
+            },
+            body: file,
+          },
+        );
+        uploadedAttachments.push({
+          id: (await response.json()).id,
+          name: file.name,
+          type: file.type,
+        });
+      }
+    }
+    promptStore.setAttachmentFiles([]);
+    return uploadedAttachments;
+  })();
+
   selectedPrompt.value = null;
-
   const currentThreadId = route.params.id as string | undefined;
-
-  // Prepare options with current model and thinking budget
   const options: any = {};
   if (currentModel.value?.apiModel) {
-    options.model = currentModel.value.apiModel;
+    options.name = currentModel.value.apiModel;
   }
   if (thinkingBudget.value && currentModel.value?.reasoningAbility) {
     options.thinkingBudget = thinkingBudget.value;
   }
-
   if (!currentThreadId) {
     try {
-      // Title can be derived or passed explicitly if available
       const { threadId: newThreadId } = await $sync.newThread({
-        messageContent: text,
-        model: options.model,
-        thinkingBudget: options.thinkingBudget,
+        content: text,
+        attachments,
+        options,
       });
       navigateTo(`/${newThreadId}`);
     } catch (error) {
       console.error("Failed to create new thread:", error);
-      // TODO: Show error to user
     }
   } else {
-    await $sync.sendMessage(currentThreadId, { content: text }, options);
+    await $sync.sendMessage({
+      threadId: currentThreadId,
+      content: text,
+      attachments,
+      options,
+    });
   }
+  sendingMessage.value = false;
 };
 
-// Retry message function
 const retryMessage = async (messageId: string) => {
   try {
-    // Prepare options with current model and thinking budget
     const options: any = {};
     if (currentModel.value?.apiModel) {
       options.model = currentModel.value.apiModel;
@@ -310,7 +334,6 @@ const retryMessage = async (messageId: string) => {
     if (thinkingBudget.value && currentModel.value?.reasoningAbility) {
       options.thinkingBudget = thinkingBudget.value;
     }
-
     await $sync.retryMessage(messageId, options);
   } catch (error) {
     console.error("Failed to retry message:", error);

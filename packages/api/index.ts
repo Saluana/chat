@@ -13,6 +13,7 @@ import { PushEvent, SyncEvent, PushEventSchema } from "./types";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamText } from "ai";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 
 let _client: ReturnType<typeof createClient>;
@@ -49,6 +50,7 @@ export class User extends DurableObject {
   clock: number;
   user: SubjectUser;
   env: Env;
+  miniBucket: any;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -78,6 +80,10 @@ export class User extends DurableObject {
         ws.send(JSON.stringify(event));
       }
     }
+  }
+
+  async #getBlob(id: string) {
+    return await this.env.BLOB.get(id);
   }
 
   async fetch(request: Request): Promise<Response> {
@@ -305,10 +311,37 @@ export class User extends DurableObject {
             }
           }
 
-          const formattedMessages = messages.map((msg) => ({
-            role: msg.role,
-            content: (msg.data as any)?.content || "",
-          }));
+          const formattedMessages = await Promise.all(
+            messages.map(async (msg: any) => {
+              const data = msg.data;
+              const content: any[] = [];
+              if (data?.content) {
+                content.push({ type: "text", text: data.content });
+              }
+              if (data?.attachments) {
+                for (const attachment of data.attachments) {
+                  const blob = await this.#getBlob(attachment.id);
+                  const isPDF = attachment.type === "application/pdf";
+                  if (blob) {
+                    content.push({
+                      type: isPDF ? "file" : "image",
+                      ...(isPDF
+                        ? {
+                            data: await blob.arrayBuffer(),
+                            mimeType: attachment.type,
+                          }
+                        : { image: await blob.arrayBuffer() }),
+                    });
+                  }
+                }
+              }
+              return {
+                role: msg.role,
+                content,
+              };
+            }),
+          );
+          console.log("formatted", formattedMessages);
 
           let message: any;
           let messageIdToUse: string;
@@ -391,27 +424,30 @@ export class User extends DurableObject {
 
           (async () => {
             try {
-              const model = options?.model;
-              const streamOptions = {
-                thinkingBudget: options?.thinkingBudget, // "low", "medium", "high"
-                ...options,
+              const [openrouterApiKeyRecord, geminiApiKeyRecord] =
+                await Promise.all([
+                  this.db.query.kv.findFirst({
+                    where: (kv, { eq }) => eq(kv.name, "openrouter_api_key"),
+                  }),
+                  this.db.query.kv.findFirst({
+                    where: (kv, { eq }) => eq(kv.name, "gemini_api_key"),
+                  }),
+                ]);
+              const keys = {
+                openrouter: openrouterApiKeyRecord?.value || "",
+                gemini: geminiApiKeyRecord?.value || "",
               };
-              const apiKeyRecord = await this.db.query.kv.findFirst({
-                where: (kv, { eq }) => eq(kv.name, "openrouter_api_key"),
-              });
-              const apiKey = apiKeyRecord?.value || "";
               const response = await streamStub.init(
                 formattedMessages,
-                model,
-                streamOptions,
-                apiKey,
+                options,
+                keys,
               );
               const syncEvents: SyncEvent[] = [];
               const finalClock = this.#tick();
               const updatedMessage = this.db
                 .update(schema.messages)
                 .set({
-                  data: { content: response },
+                  data: { content: response, modelOptions: options },
                   stream_id: null,
                   clock: finalClock,
                 })
@@ -646,20 +682,22 @@ export class Stream extends DurableObject {
     this.initialized = false;
   }
 
-  async init(
-    messages: any[],
-    model: string,
-    options: any = {},
-    apiKey: string,
-  ) {
+  async init(messages: any[], options: any = {}, keys: Record<string, string>) {
     this.initialized = true;
     this.response = "";
     try {
-      const openrouter = createOpenRouter({
-        apiKey,
-      });
+      const getModel = (name: string) => {
+        if (name.startsWith("google/") && keys.gemini) {
+          return createGoogleGenerativeAI({ apiKey: keys.gemini })(
+            name.slice("google/".length),
+          );
+        }
+        if (!keys.openrouter) throw new Error("openrouter_api_key is required");
+        return createOpenRouter({ apiKey: keys.openrouter });
+      };
+
       const streamConfig: any = {
-        model: openrouter(model),
+        model: getModel(options.name),
         messages,
         onError: (error: any) => {
           for (const controller of this.activeStreams) {
@@ -674,11 +712,6 @@ export class Stream extends DurableObject {
           throw error;
         },
       };
-      if (options.thinkingBudget) {
-        streamConfig.reasoning = {
-          effort: options.thinkingBudget, // "low", "medium", or "high"
-        };
-      }
       const res = streamText(streamConfig);
       const { textStream } = res;
       for await (const part of textStream) {
@@ -697,6 +730,7 @@ export class Stream extends DurableObject {
       this.activeStreams = [];
       this.done = true;
     } catch (error) {
+      console.log("stream error", error);
       for (const controller of this.activeStreams) {
         try {
           controller.error(error);
@@ -763,6 +797,29 @@ app.get("/stream/:id", async (c) => {
   const stub = binding.get(binding.idFromName(c.req.param("id")));
   const res = await stub.fetch(c.req.raw);
   return res;
+});
+app.put("/blob", async (c) => {
+  const user = await verifyRequest(c.req.raw);
+  const id = user.id + "/" + crypto.randomUUID();
+  const contentType = c.req.header("content-type");
+  if (!contentType) {
+    return c.text("content-type header is required", 400);
+  }
+  const validTypes = [
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "application/pdf",
+  ];
+  if (!validTypes.includes(contentType)) {
+    return c.text(`Unsupported file type: ${contentType}`, 400);
+  }
+  const contentLength = c.req.header("content-length");
+  if (!contentLength || Number(contentLength) > 10 * 1024 * 1024) {
+    return c.text("File size must be less than 10MB", 400);
+  }
+  await c.env.BLOB.put(id, await c.req.arrayBuffer());
+  return c.json({ id }, 200);
 });
 app.all("*", async (c) => {
   try {
