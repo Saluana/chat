@@ -329,7 +329,7 @@ const retryMessage = async (messageId: string) => {
   try {
     const options: any = {};
     if (currentModel.value?.apiModel) {
-      options.model = currentModel.value.apiModel;
+      options.name = currentModel.value.apiModel;
     }
     if (thinkingBudget.value && currentModel.value?.reasoningAbility) {
       options.thinkingBudget = thinkingBudget.value;
