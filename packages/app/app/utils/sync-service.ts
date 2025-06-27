@@ -1,4 +1,6 @@
-import SQLiteESMFactory from "wa-sqlite/dist/wa-sqlite.mjs";
+import SQLiteESMFactory from "wa-sqlite/dist/wa-sqlite-async.mjs";
+// @ts-ignore
+import { IDBBatchAtomicVFS } from "wa-sqlite/src/examples/IDBBatchAtomicVFS.js";
 import * as SQLite from "wa-sqlite";
 import type { Thread } from "../composables/useThreadsStore";
 import type { PushEvent } from "@nuxflare-chat/api/types";
@@ -7,6 +9,10 @@ let sqlite3: ReturnType<typeof SQLite.Factory>;
 let db: number;
 const THREADS_CHANNEL_NAME = "threads-channel";
 let threadsChannel: BroadcastChannel;
+let _clock = 0;
+let messageQueue: any[] = [];
+let isQueuePaused = false;
+const QUEUE_PROCESSING_INTERVAL = 100;
 
 let dbReadyResolvers: Array<() => void> = [];
 let isDbReady = false;
@@ -65,7 +71,9 @@ const THREAD_COLUMNS = [
 async function initService() {
   const module = await SQLiteESMFactory();
   sqlite3 = SQLite.Factory(module);
-  db = await sqlite3.open_v2("myDB");
+  const vfs = await IDBBatchAtomicVFS.create("hello", module);
+  sqlite3.vfs_register(vfs, true);
+  db = await sqlite3.open_v2("db");
 
   // Initialize threads table
   await sqlite3.exec(
@@ -121,6 +129,30 @@ async function initService() {
       )
     `,
   );
+
+  // Initialize clock
+  await sqlite3.exec(
+    db,
+    `
+      CREATE TABLE IF NOT EXISTS clock (
+        id INTEGER PRIMARY KEY,
+        clock INTEGER
+      );
+    `,
+  );
+  await sqlite3.exec(
+    db,
+    `INSERT OR IGNORE INTO clock (id, clock) VALUES (1, 0);`,
+  );
+  const { rows } = await execWithParams(
+    sqlite3,
+    db,
+    `SELECT clock FROM clock WHERE id = 1`,
+  );
+  if (rows.length > 0) {
+    _clock = rows[0][0] as number;
+  }
+
   threadsChannel = new BroadcastChannel(THREADS_CHANNEL_NAME);
   isDbReady = true;
   console.log("db ready!");
@@ -131,7 +163,9 @@ async function initService() {
 // TODO: switch to OPFS in a worker
 
 export function syncServiceProvider() {
-  initService();
+  initService().then(() => {
+    processMessageQueue();
+  });
 
   const convertToMs = (s?: number | string | null): number => {
     if (s === undefined || s === null) return 0;
@@ -142,6 +176,19 @@ export function syncServiceProvider() {
 
   function getMessageChannelName(threadId: string): string {
     return `messages-channel-${threadId}`;
+  }
+
+  async function updateClock(newClock: number) {
+    console.log("newClock", newClock, _clock);
+    if (newClock > _clock) {
+      _clock = newClock;
+      await execWithParams(
+        sqlite3,
+        db,
+        `UPDATE clock SET clock = ? WHERE id = 1`,
+        [_clock],
+      );
+    }
   }
 
   async function applyChange(msg: any) {
@@ -156,7 +203,8 @@ export function syncServiceProvider() {
       }
 
       // Use UPSERT pattern with clock-based conflict resolution
-      await sqlite3.execWithParams(
+      await execWithParams(
+        sqlite3,
         db,
         `
         INSERT INTO threads (id, title, created_at, updated_at, last_message_at, parent_thread_id, status, deleted, pinned, clock)
@@ -188,6 +236,7 @@ export function syncServiceProvider() {
       // Check if any rows were affected
       const changes = sqlite3.changes(db);
       if (changes > 0) {
+        await updateClock(newClock);
         const updatedThread = await api.getThread(backendThread.id);
         if (updatedThread) {
           threadsChannel.postMessage({
@@ -211,7 +260,8 @@ export function syncServiceProvider() {
       }
 
       // Use UPSERT pattern with clock-based conflict resolution
-      await sqlite3.execWithParams(
+      await execWithParams(
+        sqlite3,
         db,
         `
         INSERT INTO messages (id, role, content, data, created_at, updated_at, error, deleted, thread_id, clock, stream_id, message_index)
@@ -247,6 +297,7 @@ export function syncServiceProvider() {
 
       const changes = sqlite3.changes(db);
       if (changes > 0) {
+        await updateClock(newClock);
         const updatedMessage = await api.getMessage(backendMessage.id);
         if (updatedMessage) {
           const messageChannel = new BroadcastChannel(
@@ -274,7 +325,8 @@ export function syncServiceProvider() {
       }
 
       // Use UPSERT pattern with clock-based conflict resolution
-      await sqlite3.execWithParams(
+      await execWithParams(
+        sqlite3,
         db,
         `
         INSERT INTO kv (id, name, value, created_at, updated_at, clock)
@@ -294,12 +346,36 @@ export function syncServiceProvider() {
           newClock,
         ],
       );
+      await updateClock(newClock);
     }
   }
 
   let wsSendFunction: ((data: string | ArrayBuffer | Blob) => void) | null =
     null;
   let _token: string, _endpoint: string;
+
+  async function processMessageQueue() {
+    if (isQueuePaused) {
+      setTimeout(processMessageQueue, QUEUE_PROCESSING_INTERVAL);
+      return;
+    }
+
+    if (messageQueue.length > 0) {
+      const msg = messageQueue[0]; // Peek at message
+      if (msg.clock > _clock + 1) {
+        console.log(
+          `Missed events. Local clock: ${_clock}, message clock: ${msg.clock}. Pulling changes.`,
+        );
+        await pullChanges();
+        // After pullChanges, the loop will continue and re-evaluate.
+      } else {
+        messageQueue.shift(); // Consume message
+        await applyChange(msg);
+      }
+    }
+
+    setTimeout(processMessageQueue, QUEUE_PROCESSING_INTERVAL);
+  }
 
   async function restartWebsocketsServer() {
     const { send } = useWebSocket(_endpoint, {
@@ -325,7 +401,7 @@ export function syncServiceProvider() {
       onMessage: async (_ws, event) => {
         try {
           const msg = JSON.parse(event.data as string);
-          await applyChange(msg);
+          messageQueue.push(msg);
         } catch (e) {
           console.error(
             "Error processing message from backend:",
@@ -339,8 +415,10 @@ export function syncServiceProvider() {
   }
 
   async function pullChanges() {
+    isQueuePaused = true;
     try {
-      const response = await fetch(`${_endpoint}/pull`, {
+      console.log("pulling", _clock);
+      const response = await fetch(`${_endpoint}/pull?clock=${_clock}`, {
         headers: {
           Authentication: `Bearer ${_token}`,
         },
@@ -383,6 +461,8 @@ export function syncServiceProvider() {
       );
     } catch (error) {
       console.error("Error pulling changes:", error);
+    } finally {
+      isQueuePaused = false;
     }
   }
 
@@ -457,7 +537,8 @@ export function syncServiceProvider() {
     },
     async getThread(threadId: string): Promise<Thread | null> {
       await waitForDatabase();
-      const { rows } = await sqlite3.execWithParams(
+      const { rows } = await execWithParams(
+        sqlite3,
         db,
         `SELECT ${THREAD_COLUMNS.join(", ")} FROM threads WHERE id = ?`,
         [threadId],
@@ -467,7 +548,8 @@ export function syncServiceProvider() {
     },
     async getMessage(messageId: string): Promise<any | null> {
       await waitForDatabase();
-      const { rows } = await sqlite3.execWithParams(
+      const { rows } = await execWithParams(
+        sqlite3,
         db,
         `SELECT id, role, content, data, created_at, updated_at, error, deleted, thread_id, clock, stream_id, message_index
          FROM messages WHERE id = ?`,
@@ -503,7 +585,8 @@ export function syncServiceProvider() {
     },
     async getMessagesForThread(threadId: string): Promise<any[]> {
       await waitForDatabase();
-      const { rows } = await sqlite3.execWithParams(
+      const { rows } = await execWithParams(
+        sqlite3,
         db,
         `SELECT id, role, content, data, created_at, updated_at, error, deleted, thread_id, clock, stream_id, message_index
          FROM messages WHERE thread_id = ? AND deleted = 0 ORDER BY message_index ASC, created_at ASC`,
@@ -597,7 +680,8 @@ export function syncServiceProvider() {
       await waitForSync();
 
       // First get the message to find the thread ID
-      const { rows } = await sqlite3.execWithParams(
+      const { rows } = await execWithParams(
+        sqlite3,
         db,
         `SELECT thread_id FROM messages WHERE id = ?`,
         [messageId],
@@ -648,7 +732,8 @@ export function syncServiceProvider() {
     },
     async getKV(name: string): Promise<string | null> {
       await waitForDatabase();
-      const { rows } = await sqlite3.execWithParams(
+      const { rows } = await execWithParams(
+        sqlite3,
         db,
         `SELECT value FROM kv WHERE name = ?`,
         [name],
