@@ -53,7 +53,10 @@ const THREAD_COLUMNS = [
 ];
 
 async function initService() {
-  const { rows } = await newfingf(`SELECT clock FROM clock WHERE id = 1`);
+  const { rows } = await dbExec({
+    sql: `SELECT clock FROM clock WHERE id = 1`,
+    bindings: undefined,
+  });
   if (rows.length > 0) {
     _clock = rows[0][0] as number;
   }
@@ -78,7 +81,10 @@ export function syncServiceProvider() {
   async function updateClock(newClock: number) {
     if (newClock > _clock) {
       _clock = newClock;
-      await newfingf(`UPDATE clock SET clock = ? WHERE id = 1`, [_clock]);
+      await dbExec({
+        sql: `UPDATE clock SET clock = ? WHERE id = 1`,
+        bindings: [_clock],
+      });
     }
   }
 
@@ -93,8 +99,8 @@ export function syncServiceProvider() {
       }
 
       // Use UPSERT pattern with clock-based conflict resolution
-      const { changes } = await newfingf(
-        `
+      const { changes } = await dbExec({
+        sql: `
         INSERT INTO threads (id, title, created_at, updated_at, last_message_at, parent_thread_id, status, deleted, pinned, clock)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
@@ -107,7 +113,7 @@ export function syncServiceProvider() {
           clock = excluded.clock
         WHERE excluded.clock > threads.clock OR threads.clock IS NULL;
         `,
-        [
+        bindings: [
           backendThread.id,
           backendThread.title ?? "Untitled",
           convertToMs(backendThread.created_at),
@@ -119,7 +125,7 @@ export function syncServiceProvider() {
           backendThread.pinned ? 1 : 0,
           newClock,
         ],
-      );
+      });
       await updateClock(newClock);
       if (changes > 0) {
         const updatedThread = await api.getThread(backendThread.id);
@@ -145,8 +151,8 @@ export function syncServiceProvider() {
       }
 
       // Use UPSERT pattern with clock-based conflict resolution
-      const { changes } = await newfingf(
-        `
+      const { changes } = await dbExec({
+        sql: `
         INSERT INTO messages (id, role, content, data, created_at, updated_at, error, deleted, thread_id, clock, stream_id, message_index)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(id) DO UPDATE SET
@@ -161,7 +167,7 @@ export function syncServiceProvider() {
           clock = excluded.clock
         WHERE (excluded.clock > messages.clock OR messages.clock IS NULL) AND thread_id = ?;
         `,
-        [
+        bindings: [
           backendMessage.id,
           backendMessage.role ?? "user",
           backendMessage.content ?? backendMessage.data?.content ?? "",
@@ -176,7 +182,7 @@ export function syncServiceProvider() {
           backendMessage.index ?? 0,
           backendMessage.thread_id,
         ],
-      );
+      });
       await updateClock(newClock);
       if (changes > 0) {
         const updatedMessage = await api.getMessage(backendMessage.id);
@@ -206,8 +212,8 @@ export function syncServiceProvider() {
       }
 
       // Use UPSERT pattern with clock-based conflict resolution
-      await newfingf(
-        `
+      await dbExec({
+        sql: `
         INSERT INTO kv (id, name, value, created_at, updated_at, clock)
         VALUES (?, ?, ?, ?, ?, ?)
         ON CONFLICT(name) DO UPDATE SET
@@ -216,7 +222,7 @@ export function syncServiceProvider() {
           clock = excluded.clock
         WHERE excluded.clock > kv.clock OR kv.clock IS NULL;
         `,
-        [
+        bindings: [
           backendKV.id,
           backendKV.name,
           backendKV.value,
@@ -224,7 +230,7 @@ export function syncServiceProvider() {
           convertToMs(backendKV.updated_at),
           newClock,
         ],
-      );
+      });
       await updateClock(newClock);
     }
   }
@@ -419,19 +425,19 @@ export function syncServiceProvider() {
       return { threadId };
     },
     async getThread(threadId: string): Promise<Thread | null> {
-      const { rows } = await newfingf(
-        `SELECT ${THREAD_COLUMNS.join(", ")} FROM threads WHERE id = ?`,
-        [threadId],
-      );
+      const { rows } = await dbExec({
+        sql: `SELECT ${THREAD_COLUMNS.join(", ")} FROM threads WHERE id = ?`,
+        bindings: [threadId],
+      });
       const thread = rows[0] ? mapRowToThread(rows[0], THREAD_COLUMNS) : null;
       return thread;
     },
     async getMessage(messageId: string): Promise<any | null> {
-      const { rows } = await newfingf(
-        `SELECT id, role, content, data, created_at, updated_at, error, deleted, thread_id, clock, stream_id, message_index
+      const { rows } = await dbExec({
+        sql: `SELECT id, role, content, data, created_at, updated_at, error, deleted, thread_id, clock, stream_id, message_index
          FROM messages WHERE id = ?`,
-        [messageId],
-      );
+        bindings: [messageId],
+      });
       const messages = rows.map((row) => ({
         id: row[0],
         role: row[1],
@@ -449,18 +455,19 @@ export function syncServiceProvider() {
       return messages[0];
     },
     async getThreads(): Promise<Thread[]> {
-      const { rows } = await newfingf(
-        `SELECT ${THREAD_COLUMNS.join(", ")} FROM threads WHERE deleted = 0 ORDER BY last_message_at DESC`,
-      );
+      const { rows } = await dbExec({
+        sql: `SELECT ${THREAD_COLUMNS.join(", ")} FROM threads WHERE deleted = 0 ORDER BY last_message_at DESC`,
+        bindings: undefined,
+      });
       const threads = rows.map((row) => mapRowToThread(row, THREAD_COLUMNS));
       return threads;
     },
     async getMessagesForThread(threadId: string): Promise<any[]> {
-      const { rows } = await newfingf(
-        `SELECT id, role, content, data, created_at, updated_at, error, deleted, thread_id, clock, stream_id, message_index
+      const { rows } = await dbExec({
+        sql: `SELECT id, role, content, data, created_at, updated_at, error, deleted, thread_id, clock, stream_id, message_index
          FROM messages WHERE thread_id = ? AND deleted = 0 ORDER BY message_index ASC, created_at ASC`,
-        [threadId],
-      );
+        bindings: [threadId],
+      });
       const messages = rows.map((row) => ({
         id: row[0],
         role: row[1],
@@ -549,10 +556,10 @@ export function syncServiceProvider() {
       await waitForSync();
 
       // First get the message to find the thread ID
-      const { rows } = await newfingf(
-        `SELECT thread_id FROM messages WHERE id = ?`,
-        [messageId],
-      );
+      const { rows } = await dbExec({
+        sql: `SELECT thread_id FROM messages WHERE id = ?`,
+        bindings: [messageId],
+      });
 
       if (!rows[0]) {
         throw new Error("Message not found");
@@ -598,9 +605,10 @@ export function syncServiceProvider() {
       return newThreadId;
     },
     async getKV(name: string): Promise<string | null> {
-      const { rows } = await newfingf(`SELECT value FROM kv WHERE name = ?`, [
-        name,
-      ]);
+      const { rows } = await dbExec({
+        sql: `SELECT value FROM kv WHERE name = ?`,
+        bindings: [name],
+      });
       return rows[0] ? rows[0][0] : null;
     },
     async setKV(name: string, value: string) {

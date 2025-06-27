@@ -109,13 +109,19 @@ export const initDatabase = async () => {
   dbReadyResolvers = [];
 };
 
-export const newfingf = async (sql: string, params?: any) => {
+export const dbExec = async ({
+  sql,
+  bindings,
+}: {
+  sql: string;
+  bindings: any;
+}) => {
   await waitForDatabase();
   let columns: any[] = [];
   const rows: any[] = [];
   for await (const stmt of sqlite3.statements(db, sql)) {
-    if (params) {
-      sqlite3.bind_collection(stmt, params);
+    if (bindings) {
+      sqlite3.bind_collection(stmt, bindings);
     }
     while ((await sqlite3.step(stmt)) === SQLite.SQLITE_ROW) {
       columns = columns.length === 0 ? sqlite3.column_names(stmt) : columns;
@@ -128,10 +134,4 @@ export const newfingf = async (sql: string, params?: any) => {
     columns: columns,
     changes: sqlite3.changes(db),
   };
-};
-
-// TODO: callbacks?
-export const whatfingf = async (sql: string) => {
-  await waitForDatabase();
-  await sqlite3.exec(db, sql);
 };
