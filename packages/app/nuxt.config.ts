@@ -24,7 +24,6 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       apiUrl: "http://localhost:8787",
-      authUrl: "https://auth.prodemo.nuxflare.com",
     },
   },
   css: ["~/assets/css/main.css"],

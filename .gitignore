@@ -35,3 +35,4 @@ logs
 
 # alchemy
 .alchemy
+wrangler.jsonc

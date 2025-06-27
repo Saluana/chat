@@ -5,7 +5,12 @@ import { DurableObject } from "cloudflare:workers";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./drizzle/migrations";
 import { createClient } from "@openauthjs/openauth/client";
-import { subjects, type SubjectUser } from "@nuxflare-chat/common/auth";
+import {
+  subjects,
+  authUrl,
+  authClientID,
+  type SubjectUser,
+} from "@nuxflare-chat/common/auth";
 import * as schema from "./schema";
 import { sql } from "drizzle-orm";
 import * as v from "valibot";
@@ -21,8 +26,8 @@ const getClient = () => {
   if (_client) return _client;
   return (_client = createClient({
     // TODO: update these to read from env, also make sure cert gets memoized correctly in worker?
-    issuer: "https://auth.prodemo.nuxflare.com",
-    clientID: "nuxflare-chat",
+    issuer: authUrl,
+    clientID: authClientID,
   }));
 };
 
