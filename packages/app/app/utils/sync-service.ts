@@ -1,23 +1,13 @@
-import SQLiteESMFactory from "wa-sqlite/dist/wa-sqlite.mjs";
-import * as SQLite from "wa-sqlite";
 import type { Thread } from "../composables/useThreadsStore";
 import type { PushEvent } from "@nuxflare-chat/api/types";
 
-let sqlite3: ReturnType<typeof SQLite.Factory>;
-let db: number;
 const THREADS_CHANNEL_NAME = "threads-channel";
-let threadsChannel: BroadcastChannel;
+const threadsChannel = new BroadcastChannel(THREADS_CHANNEL_NAME);
+let _clock = 0;
+let messageQueue: any[] = [];
+let isQueuePaused = false;
+const QUEUE_PROCESSING_INTERVAL = 10;
 
-let dbReadyResolvers: Array<() => void> = [];
-let isDbReady = false;
-function waitForDatabase(): Promise<void> {
-  if (isDbReady) {
-    return Promise.resolve();
-  }
-  return new Promise((resolve) => {
-    dbReadyResolvers.push(resolve);
-  });
-}
 let syncReadyResolvers: Array<() => void> = [];
 let isSyncReady = false;
 function waitForSync(): Promise<void> {
@@ -63,75 +53,16 @@ const THREAD_COLUMNS = [
 ];
 
 async function initService() {
-  const module = await SQLiteESMFactory();
-  sqlite3 = SQLite.Factory(module);
-  db = await sqlite3.open_v2("myDB");
-
-  // Initialize threads table
-  await sqlite3.exec(
-    db,
-    `
-      CREATE TABLE IF NOT EXISTS threads (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        last_message_at INTEGER NOT NULL,
-        parent_thread_id TEXT,
-        status TEXT NOT NULL DEFAULT 'ready',
-        deleted INTEGER DEFAULT 0,
-        pinned INTEGER DEFAULT 0,
-        clock INTEGER
-      )
-    `,
-  );
-
-  // Initialize messages table
-  await sqlite3.exec(
-    db,
-    `
-      CREATE TABLE IF NOT EXISTS messages (
-        id TEXT PRIMARY KEY,
-        role TEXT NOT NULL,
-        content TEXT NOT NULL,
-        data TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        error TEXT,
-        deleted INTEGER DEFAULT 0,
-        thread_id TEXT NOT NULL,
-        stream_id TEXT,
-        message_index INTEGER NOT NULL DEFAULT 0,
-        clock INTEGER
-      )
-    `,
-  );
-
-  // Initialize kv table
-  await sqlite3.exec(
-    db,
-    `
-      CREATE TABLE IF NOT EXISTS kv (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
-        value TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        clock INTEGER
-      )
-    `,
-  );
-  threadsChannel = new BroadcastChannel(THREADS_CHANNEL_NAME);
-  isDbReady = true;
-  console.log("db ready!");
-  dbReadyResolvers.forEach((resolve) => resolve());
-  dbReadyResolvers = [];
+  const { rows } = await newfingf(`SELECT clock FROM clock WHERE id = 1`);
+  if (rows.length > 0) {
+    _clock = rows[0][0] as number;
+  }
 }
 
-// TODO: switch to OPFS in a worker
-
 export function syncServiceProvider() {
-  initService();
+  initService().then(() => {
+    startMessageQueue();
+  });
 
   const convertToMs = (s?: number | string | null): number => {
     if (s === undefined || s === null) return 0;
@@ -144,8 +75,14 @@ export function syncServiceProvider() {
     return `messages-channel-${threadId}`;
   }
 
+  async function updateClock(newClock: number) {
+    if (newClock > _clock) {
+      _clock = newClock;
+      await newfingf(`UPDATE clock SET clock = ? WHERE id = 1`, [_clock]);
+    }
+  }
+
   async function applyChange(msg: any) {
-    await waitForDatabase();
     if (msg.type === "thread" && msg.data) {
       const backendThread = msg.data;
       const newClock = msg.clock;
@@ -156,8 +93,7 @@ export function syncServiceProvider() {
       }
 
       // Use UPSERT pattern with clock-based conflict resolution
-      await sqlite3.execWithParams(
-        db,
+      const { changes } = await newfingf(
         `
         INSERT INTO threads (id, title, created_at, updated_at, last_message_at, parent_thread_id, status, deleted, pinned, clock)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -184,9 +120,7 @@ export function syncServiceProvider() {
           newClock,
         ],
       );
-
-      // Check if any rows were affected
-      const changes = sqlite3.changes(db);
+      await updateClock(newClock);
       if (changes > 0) {
         const updatedThread = await api.getThread(backendThread.id);
         if (updatedThread) {
@@ -211,8 +145,7 @@ export function syncServiceProvider() {
       }
 
       // Use UPSERT pattern with clock-based conflict resolution
-      await sqlite3.execWithParams(
-        db,
+      const { changes } = await newfingf(
         `
         INSERT INTO messages (id, role, content, data, created_at, updated_at, error, deleted, thread_id, clock, stream_id, message_index)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -244,8 +177,7 @@ export function syncServiceProvider() {
           backendMessage.thread_id,
         ],
       );
-
-      const changes = sqlite3.changes(db);
+      await updateClock(newClock);
       if (changes > 0) {
         const updatedMessage = await api.getMessage(backendMessage.id);
         if (updatedMessage) {
@@ -274,8 +206,7 @@ export function syncServiceProvider() {
       }
 
       // Use UPSERT pattern with clock-based conflict resolution
-      await sqlite3.execWithParams(
-        db,
+      await newfingf(
         `
         INSERT INTO kv (id, name, value, created_at, updated_at, clock)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -294,12 +225,40 @@ export function syncServiceProvider() {
           newClock,
         ],
       );
+      await updateClock(newClock);
     }
   }
 
   let wsSendFunction: ((data: string | ArrayBuffer | Blob) => void) | null =
     null;
   let _token: string, _endpoint: string;
+
+  let messageQueueTimeout: any;
+  async function startMessageQueue() {
+    messageQueueTimeout = setTimeout(
+      processMessageQueue,
+      QUEUE_PROCESSING_INTERVAL,
+    );
+  }
+  async function processMessageQueue() {
+    if (messageQueueTimeout) clearTimeout(messageQueueTimeout);
+    while (messageQueue.length > 0 && !isQueuePaused) {
+      const msg = messageQueue[0];
+      if (msg.clock > _clock + 1) {
+        console.log(
+          `Missed events. Local clock: ${_clock}, message clock: ${msg.clock}. Pulling changes.`,
+        );
+        await pullChanges();
+      } else {
+        messageQueue.shift();
+        await applyChange(msg);
+      }
+    }
+    messageQueueTimeout = setTimeout(
+      processMessageQueue,
+      QUEUE_PROCESSING_INTERVAL,
+    );
+  }
 
   async function restartWebsocketsServer() {
     const { send } = useWebSocket(_endpoint, {
@@ -325,7 +284,8 @@ export function syncServiceProvider() {
       onMessage: async (_ws, event) => {
         try {
           const msg = JSON.parse(event.data as string);
-          await applyChange(msg);
+          messageQueue.push(msg);
+          startMessageQueue();
         } catch (e) {
           console.error(
             "Error processing message from backend:",
@@ -339,8 +299,9 @@ export function syncServiceProvider() {
   }
 
   async function pullChanges() {
+    isQueuePaused = true;
     try {
-      const response = await fetch(`${_endpoint}/pull`, {
+      const response = await fetch(`${_endpoint}/pull?clock=${_clock}`, {
         headers: {
           Authentication: `Bearer ${_token}`,
         },
@@ -383,6 +344,8 @@ export function syncServiceProvider() {
       );
     } catch (error) {
       console.error("Error pulling changes:", error);
+    } finally {
+      isQueuePaused = false;
     }
   }
 
@@ -456,9 +419,7 @@ export function syncServiceProvider() {
       return { threadId };
     },
     async getThread(threadId: string): Promise<Thread | null> {
-      await waitForDatabase();
-      const { rows } = await sqlite3.execWithParams(
-        db,
+      const { rows } = await newfingf(
         `SELECT ${THREAD_COLUMNS.join(", ")} FROM threads WHERE id = ?`,
         [threadId],
       );
@@ -466,9 +427,7 @@ export function syncServiceProvider() {
       return thread;
     },
     async getMessage(messageId: string): Promise<any | null> {
-      await waitForDatabase();
-      const { rows } = await sqlite3.execWithParams(
-        db,
+      const { rows } = await newfingf(
         `SELECT id, role, content, data, created_at, updated_at, error, deleted, thread_id, clock, stream_id, message_index
          FROM messages WHERE id = ?`,
         [messageId],
@@ -490,21 +449,14 @@ export function syncServiceProvider() {
       return messages[0];
     },
     async getThreads(): Promise<Thread[]> {
-      await waitForDatabase();
-      const threads: Thread[] = [];
-      await sqlite3.exec(
-        db,
+      const { rows } = await newfingf(
         `SELECT ${THREAD_COLUMNS.join(", ")} FROM threads WHERE deleted = 0 ORDER BY last_message_at DESC`,
-        (row) => {
-          threads.push(mapRowToThread(row, THREAD_COLUMNS));
-        },
       );
+      const threads = rows.map((row) => mapRowToThread(row, THREAD_COLUMNS));
       return threads;
     },
     async getMessagesForThread(threadId: string): Promise<any[]> {
-      await waitForDatabase();
-      const { rows } = await sqlite3.execWithParams(
-        db,
+      const { rows } = await newfingf(
         `SELECT id, role, content, data, created_at, updated_at, error, deleted, thread_id, clock, stream_id, message_index
          FROM messages WHERE thread_id = ? AND deleted = 0 ORDER BY message_index ASC, created_at ASC`,
         [threadId],
@@ -597,8 +549,7 @@ export function syncServiceProvider() {
       await waitForSync();
 
       // First get the message to find the thread ID
-      const { rows } = await sqlite3.execWithParams(
-        db,
+      const { rows } = await newfingf(
         `SELECT thread_id FROM messages WHERE id = ?`,
         [messageId],
       );
@@ -647,12 +598,9 @@ export function syncServiceProvider() {
       return newThreadId;
     },
     async getKV(name: string): Promise<string | null> {
-      await waitForDatabase();
-      const { rows } = await sqlite3.execWithParams(
-        db,
-        `SELECT value FROM kv WHERE name = ?`,
-        [name],
-      );
+      const { rows } = await newfingf(`SELECT value FROM kv WHERE name = ?`, [
+        name,
+      ]);
       return rows[0] ? rows[0][0] : null;
     },
     async setKV(name: string, value: string) {

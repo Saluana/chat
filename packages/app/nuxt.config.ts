@@ -19,12 +19,11 @@ export default defineNuxtConfig({
     "@vueuse/nuxt",
     "nuxt-svgo",
     "@pinia/nuxt",
-    "@nuxtjs/mdc",
+    "nuxt-workers",
   ],
   runtimeConfig: {
     public: {
       apiUrl: "http://localhost:8787",
-      authUrl: "https://auth.prodemo.nuxflare.com",
     },
   },
   css: ["~/assets/css/main.css"],

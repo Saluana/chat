@@ -1,5 +1,1 @@
-// export async function queryDatabase(db: number, query: string) {
-//   const rows = [];
-//
-//   return rows;
-// }
+import * as SQLite from "wa-sqlite";

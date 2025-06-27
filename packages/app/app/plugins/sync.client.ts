@@ -70,7 +70,8 @@ export default defineNuxtPlugin({
             return await sharedService.proxy["newThread"]!(params);
           },
           async getThreads() {
-            await isReady();
+            // TODO: debug why this doesn't work with just isReady
+            await isSyncReady();
             return await sharedService.proxy["getThreads"]!();
           },
           async getMessagesForThread(threadId: string) {

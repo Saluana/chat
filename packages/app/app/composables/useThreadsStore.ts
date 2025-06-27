@@ -161,13 +161,6 @@ export const useThreadsStore = defineStore("threads", () => {
         else setThread(thread);
       }
     };
-
-    // Cleanup channel on store unmount (though Pinia stores are not typically unmounted like components)
-    // If this store is module-scoped and lives for the app's lifetime, explicit closing might not be urgent
-    // but good practice if the app can fully "shut down" this part.
-    // onUnmounted(() => {
-    //   threadsChannel.close();
-    // });
   }
 
   return {

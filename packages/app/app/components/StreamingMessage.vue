@@ -1,6 +1,9 @@
 <template>
   <div>
-    <VueSpinnerDots v-if="!(content.length > 0)" class="w-10" />
+    <VueSpinnerDots
+      v-if="!(content.length > 0) && !(reasoning.length > 0)"
+      class="w-10"
+    />
     <MarkdownRenderer :content="content" />
   </div>
 </template>
@@ -9,6 +12,7 @@
 import { VueSpinnerDots } from "vue3-spinners";
 const props = defineProps<{ streamId: string }>();
 const content = ref("");
+const reasoning = ref("");
 const isStreaming = ref(true);
 const config = useRuntimeConfig();
 const promptStore = usePromptStore();
