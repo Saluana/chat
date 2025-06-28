@@ -453,6 +453,7 @@ export class User extends DurableObject {
                 .set({
                   data: { content: response, modelOptions: options },
                   stream_id: null,
+                  error: null,
                   clock: finalClock,
                 })
                 .where(sql`id = ${messageIdToUse}`)
@@ -494,7 +495,6 @@ export class User extends DurableObject {
                 console.error("Error getting partial response:", e);
               }
 
-              // Update message with partial content and error
               // TODO: handle more specific error messages?
               const errorClock = this.#tick();
               const errorMessage = this.db
@@ -518,6 +518,25 @@ export class User extends DurableObject {
                   data: errorMessage,
                 });
               }
+
+              const finalThreadClock = this.#tick();
+              const finalThread = this.db
+                .update(schema.threads)
+                .set({
+                  status: "ready",
+                  clock: finalThreadClock,
+                })
+                .where(sql`id = ${threadId}`)
+                .returning()
+                .get();
+              if (finalThread) {
+                syncEvents.push({
+                  type: "thread",
+                  clock: finalThreadClock,
+                  data: finalThread,
+                });
+              }
+
               this.#sendEvents(syncEvents);
             }
           })();
