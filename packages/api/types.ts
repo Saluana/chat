@@ -62,7 +62,7 @@ export const UpdateMessageSchema = v.object({
   type: v.literal("update_message"),
   data: v.object({
     id: v.string(),
-    data: v.partial(MessageDataSchema),
+    data: v.optional(v.partial(MessageDataSchema)),
     deleted: v.optional(v.boolean()),
   }),
 });

@@ -136,7 +136,7 @@ const saveMessage = async () => {
   if (newContent && newContent !== props.message.content) {
     try {
       await $sync.updateMessage(props.message.id, {
-        data: { content: newContent },
+        data: { ...props.message.data, content: newContent },
       });
       showToast("Message updated successfully");
     } catch (error) {
