@@ -57,19 +57,7 @@
     <!-- Assistant message -->
     <div v-else class="flex justify-start mb-2 group">
       <div class="w-full p-3 space-y-2">
-        <Reasoning v-if="message.reasoning" :content="message.reasoning" />
-        <div class="flex flex-col">
-          <StreamingMessage
-            v-if="message.stream_id"
-            :stream-id="message.stream_id"
-          />
-          <MarkdownRenderer :content="message.content" />
-          <AssistantErrorMessage
-            :error="message.error"
-            v-if="!message.stream_id && message.error"
-          />
-        </div>
-        <WebSearch v-if="message.webSearch" :content="message.webSearch" />
+        <AssistantMessage :message="message" />
 
         <!-- Action icons - shown on hover -->
         <div

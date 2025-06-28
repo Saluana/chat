@@ -3,7 +3,7 @@
     :items="items"
     :ui="{
       root: 'rounded-lg px-2 bg-neutral-100 dark:bg-neutral-800',
-      content: 'px-2',
+      content: 'px-2 pb-2',
       body: 'text-md',
       trigger: 'cursor-pointer relative',
       trailingIcon:
@@ -13,6 +13,9 @@
     <template #default="{ item }">
       <p class="text-[15px] font-medium ml-8">{{ item.label }}</p>
     </template>
+    <template #content>
+      <MarkdownRenderer :content="content" />
+    </template>
   </UAccordion>
 </template>
 
@@ -21,11 +24,10 @@ import type { AccordionItem } from "@nuxt/ui";
 interface Props {
   content: string;
 }
-const props = defineProps<Props>();
+const { content } = defineProps<Props>();
 const items = ref<AccordionItem[]>([
   {
     label: "Reasoning",
-    content: props.content,
   },
 ]);
 </script>

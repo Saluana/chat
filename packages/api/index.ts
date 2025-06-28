@@ -455,7 +455,7 @@ export class User extends DurableObject {
                 openai: openaiApiKey?.value || "",
                 anthropic: anthropicApiKey?.value || "",
               };
-              const response = await streamStub.init(
+              const { content, reasoning } = await streamStub.init(
                 formattedMessages,
                 options,
                 keys,
@@ -465,7 +465,7 @@ export class User extends DurableObject {
               const updatedMessage = this.db
                 .update(schema.messages)
                 .set({
-                  data: { content: response, modelOptions: options },
+                  data: { content, reasoning, modelOptions: options },
                   stream_id: null,
                   error: null,
                   clock: finalClock,
@@ -502,9 +502,13 @@ export class User extends DurableObject {
             } catch (error) {
               const syncEvents: SyncEvent[] = [];
 
-              let partialResponse = "";
+              let partialContent = "";
+              let partialReasoning = "";
               try {
-                partialResponse = await streamStub.getPartialResponse();
+                const { content, reasoning } =
+                  await streamStub.getPartialResponse();
+                partialContent = content;
+                partialReasoning = reasoning;
               } catch (e) {
                 console.error("Error getting partial response:", e);
               }
@@ -514,7 +518,10 @@ export class User extends DurableObject {
               const errorMessage = this.db
                 .update(schema.messages)
                 .set({
-                  data: { content: partialResponse },
+                  data: {
+                    content: partialContent,
+                    reasoning: partialReasoning,
+                  },
                   error: JSON.stringify({
                     type: "StreamError",
                     message: "An error occurred while generating the message",
@@ -704,24 +711,29 @@ export class User extends DurableObject {
 export class Stream extends DurableObject {
   ctx: DurableObjectState;
   env: Env;
-  response: string;
+  content: string;
+  reasoning: string;
   done: boolean;
-  activeStreams: any[]; // TODO: type
+  contentStreams: any[];
+  reasoningStreams: any[];
   initialized: boolean;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     this.ctx = ctx;
     this.env = env;
-    this.response = "";
-    this.activeStreams = [];
+    this.content = "";
+    this.reasoning = "";
+    this.contentStreams = [];
+    this.reasoningStreams = [];
     this.done = false;
     this.initialized = false;
   }
 
   async init(messages: any[], options: any = {}, keys: Record<string, string>) {
     this.initialized = true;
-    this.response = "";
+    this.content = "";
+    this.reasoning = "";
     try {
       const getModel = (name: string) => {
         // use base model name for provider specific api keys
@@ -738,72 +750,115 @@ export class Stream extends DurableObject {
           return createAnthropic({ apiKey: keys.anthropic })(baseModelName);
         }
         if (!keys.openrouter) throw new Error("openrouter_api_key is required");
-        return createOpenRouter({ apiKey: keys.openrouter });
+        return createOpenRouter({ apiKey: keys.openrouter })(options.name);
       };
 
       const streamConfig: any = {
         model: getModel(options.name),
         messages,
+        providerOptions: {
+          // TODO: set thinking budget and other options for all providers
+          google: {
+            thinkingConfig: {
+              includeThoughts: true,
+            },
+          },
+          openrouter: {
+            reasoning: {
+              effort: options.thinkingBudget || "low",
+              exclude: false,
+            },
+          },
+        },
         onError: (error: any) => {
-          for (const controller of this.activeStreams) {
+          for (const controller of [
+            this.contentStreams,
+            this.reasoningStreams,
+          ].flat()) {
             try {
               controller.close();
             } catch (e) {
               console.error("Error closing stream", e);
             }
           }
-          this.activeStreams = [];
+          this.contentStreams = [];
+          this.reasoningStreams = [];
           this.done = true;
           throw error;
         },
       };
       const res = streamText(streamConfig);
-      const { textStream } = res;
-      for await (const part of textStream) {
-        this.response += part;
-        for (const controller of this.activeStreams) {
-          try {
-            controller.enqueue(part);
-          } catch {}
+      const { fullStream } = res;
+      for await (const part of fullStream) {
+        if (part.type === "reasoning") {
+          this.reasoning += part.textDelta;
+          for (const controller of this.reasoningStreams) {
+            try {
+              controller.enqueue(part.textDelta);
+            } catch {}
+          }
+        } else if (part.type === "text-delta") {
+          this.content += part.textDelta;
+          for (const controller of this.contentStreams) {
+            try {
+              controller.enqueue(part.textDelta);
+            } catch {}
+          }
         }
       }
-      for (const controller of this.activeStreams) {
+      for (const controller of [
+        this.contentStreams,
+        this.reasoningStreams,
+      ].flat()) {
         try {
           controller.close();
         } catch {}
       }
-      this.activeStreams = [];
+      this.contentStreams = [];
+      this.reasoningStreams = [];
       this.done = true;
     } catch (error) {
       console.log("stream error", error);
-      for (const controller of this.activeStreams) {
+      for (const controller of [
+        this.contentStreams,
+        this.reasoningStreams,
+      ].flat()) {
         try {
           controller.error(error);
         } catch {}
       }
-      this.activeStreams = [];
+      this.contentStreams = [];
+      this.reasoningStreams = [];
       this.done = true;
       throw error;
     }
     // TODO: should we return response like this or have the DO do a async callback.
-    return this.response;
+    return {
+      content: this.content,
+      reasoning: this.reasoning,
+    };
   }
 
   async getPartialResponse() {
-    return this.response;
+    return {
+      content: this.content,
+      reasoning: this.reasoning,
+    };
   }
 
   async fetch(request: Request) {
     if (!this.initialized) return new Response(null, { status: 404 });
+    const isReasoning = new URL(request.url).searchParams.get("reasoning");
     try {
       if (this.done) {
-        return new Response(this.response);
+        return new Response(isReasoning ? this.reasoning : this.content);
       }
       const { readable, writable } = new TransformStream();
       const writer = writable.getWriter();
       const encoder = new TextEncoder();
-      if (this.response) {
-        writer.write(encoder.encode(this.response));
+      const response = isReasoning ? this.reasoning : this.content;
+      if (response) {
+        writer.write(encoder.encode(response));
       }
       if (this.done) {
         writer.close();
@@ -815,11 +870,15 @@ export class Stream extends DurableObject {
           close: () => writer.close(),
           error: (err: any) => writer.abort(err),
         };
-        this.activeStreams.push(controller);
+        if (isReasoning) this.reasoningStreams.push(controller);
+        else this.contentStreams.push(controller);
         request.signal.addEventListener("abort", () => {
-          const index = this.activeStreams.indexOf(controller);
+          const array = isReasoning
+            ? this.reasoningStreams
+            : this.contentStreams;
+          const index = array.indexOf(controller);
           if (index >= 0) {
-            this.activeStreams.splice(index, 1);
+            array.splice(index, 1);
           }
         });
       }
