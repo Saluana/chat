@@ -127,7 +127,7 @@ const actions = [
     },
   },
   {
-    icon: "i-hugeicons:logout-05",
+    icon: "i-heroicons-solid:logout",
     name: "Logout",
     action: async () => {
       await useSession().clear();

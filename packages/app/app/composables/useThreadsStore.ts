@@ -15,6 +15,10 @@ export interface GroupedThreads {
   [groupName: string]: Thread[];
 }
 
+const getThreadTime = (thread: any) => {
+  return Math.max(thread.created_at, thread.last_message_at);
+};
+
 export const useThreadsStore = defineStore("threads", () => {
   const threads = ref<Record<string, Thread>>({});
   const activeThread = ref<string | null>(null);
@@ -41,7 +45,7 @@ export const useThreadsStore = defineStore("threads", () => {
         result.pinned!.push(thread);
       }
     }
-    result.pinned!.sort((a, b) => b.last_message_at - a.last_message_at);
+    result.pinned!.sort((a, b) => getThreadTime(b) - getThreadTime(a));
     return result;
   });
 
@@ -66,7 +70,7 @@ export const useThreadsStore = defineStore("threads", () => {
 
     const unpinned = Object.values(threads.value)
       .filter((thread) => !thread.pinned && !thread.deleted)
-      .sort((a, b) => b.last_message_at - a.last_message_at); // Sort by most recent
+      .sort((a, b) => getThreadTime(b) - getThreadTime(a));
 
     unpinned.forEach((thread) => {
       const threadDate = new Date(thread.last_message_at);

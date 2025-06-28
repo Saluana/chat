@@ -62,10 +62,7 @@
         <div class="space-x-2 flex items-center">
           <ModelSelector @changeModel="changeModel" />
 
-          <ReasoningBudget
-            v-if="currentModel.reasoningAbility"
-            @changeBudget="changeBudget"
-          />
+          <ReasoningBudget v-if="currentModel.reasoningAbility" />
 
           <UButton
             v-if="currentModel.webSearch"
@@ -99,14 +96,22 @@
 
         <div></div>
         <UTooltip
-          :disabled="!!message.trim() || responseStreaming"
-          text="Message requires text"
+          :disabled="!!message.trim() && !responseStreaming"
+          :text="
+            responseStreaming
+              ? 'Stop response generation'
+              : 'Message requires text'
+          "
         >
           <UButton
             @click="handleSubmit"
             variant="subtle"
-            icon="i-lucide:arrow-up"
-            :disabled="!message.trim() || responseStreaming"
+            :icon="
+              responseStreaming
+                ? 'i-material-symbols:stop-rounded'
+                : 'i-lucide:arrow-up'
+            "
+            :disabled="!message.trim() && !responseStreaming"
             size="md"
             :ui="{
               base: 'disabled:bg-primary-500/50 disabled:dark:bg-primary-400/20 bg-primary-800/80 hover:bg-primary-800/70 dark:bg-primary-700/30 hover:dark:bg-primary-700/20 disabled:dark:text-white/40 text-white/80',
@@ -132,12 +137,17 @@
 const promptStore = usePromptStore();
 const { message } = storeToRefs(promptStore);
 const { responseStreaming } = storeToRefs(promptStore);
-const emit = defineEmits(["send", "model-change", "thinking-budget-change"]);
+const emit = defineEmits(["send"]);
 
 const handleSubmit = () => {
-  if (message.value.trim()) {
-    emit("send", message.value);
-    promptStore.resetMessage();
+  if (responseStreaming.value) {
+    promptStore.toggleResponseStreaming();
+    // logic for stopping the response generation
+  } else {
+    if (message.value.trim()) {
+      emit("send", message.value);
+      promptStore.resetMessage();
+    }
   }
 };
 
@@ -160,12 +170,6 @@ const changeModel = (model: any) => {
   ) {
     promptStore.clearAttachmentFiles();
   }
-  emit("model-change", model);
-  promptStore.setAttachmentTooltip();
-};
-
-const changeBudget = (budget: string) => {
-  emit("thinking-budget-change", budget);
 };
 
 const fileInput = ref<HTMLInputElement>();

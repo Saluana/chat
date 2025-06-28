@@ -20,6 +20,8 @@ import { cors } from "hono/cors";
 import { streamText } from "ai";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { createOpenAI } from "@ai-sdk/openai";
+import { createAnthropic } from "@ai-sdk/anthropic";
 
 let _client: ReturnType<typeof createClient>;
 const getClient = () => {
@@ -428,18 +430,30 @@ export class User extends DurableObject {
 
           (async () => {
             try {
-              const [openrouterApiKeyRecord, geminiApiKeyRecord] =
-                await Promise.all([
-                  this.db.query.kv.findFirst({
-                    where: (kv, { eq }) => eq(kv.name, "openrouter_api_key"),
-                  }),
-                  this.db.query.kv.findFirst({
-                    where: (kv, { eq }) => eq(kv.name, "gemini_api_key"),
-                  }),
-                ]);
+              const [
+                openrouterApiKey,
+                geminiApiKey,
+                openaiApiKey,
+                anthropicApiKey,
+              ] = await Promise.all([
+                this.db.query.kv.findFirst({
+                  where: (kv, { eq }) => eq(kv.name, "openrouter_api_key"),
+                }),
+                this.db.query.kv.findFirst({
+                  where: (kv, { eq }) => eq(kv.name, "gemini_api_key"),
+                }),
+                this.db.query.kv.findFirst({
+                  where: (kv, { eq }) => eq(kv.name, "openai_api_key"),
+                }),
+                this.db.query.kv.findFirst({
+                  where: (kv, { eq }) => eq(kv.name, "anthropic_api_key"),
+                }),
+              ]);
               const keys = {
-                openrouter: openrouterApiKeyRecord?.value || "",
-                gemini: geminiApiKeyRecord?.value || "",
+                openrouter: openrouterApiKey?.value || "",
+                gemini: geminiApiKey?.value || "",
+                openai: openaiApiKey?.value || "",
+                anthropic: anthropicApiKey?.value || "",
               };
               const response = await streamStub.init(
                 formattedMessages,
@@ -710,10 +724,18 @@ export class Stream extends DurableObject {
     this.response = "";
     try {
       const getModel = (name: string) => {
+        // use base model name for provider specific api keys
+        const baseModelName = name.match(/.*\/([^:]*):?.*/)?.[1] || "";
         if (name.startsWith("google/") && keys.gemini) {
           return createGoogleGenerativeAI({ apiKey: keys.gemini })(
-            name.slice("google/".length),
+            baseModelName,
           );
+        }
+        if (name.startsWith("openai/") && keys.openai) {
+          return createOpenAI({ apiKey: keys.openai })(baseModelName);
+        }
+        if (name.startsWith("anthropic/") && keys.anthropic) {
+          return createAnthropic({ apiKey: keys.anthropic })(baseModelName);
         }
         if (!keys.openrouter) throw new Error("openrouter_api_key is required");
         return createOpenRouter({ apiKey: keys.openrouter });

@@ -26,7 +26,12 @@
           : '',
       ]"
     >
-      <div class="flex justify-between items-center relative">
+      <div class="flex justify-start gap-2 items-center relative">
+        <UIcon
+          v-if="thread.parent_thread_id"
+          name="i-carbon:branch"
+          class="size-3.5"
+        />
         <UTooltip
           v-if="editableThreadId != thread.id"
           :text="thread.title"

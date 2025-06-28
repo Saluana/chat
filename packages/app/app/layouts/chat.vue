@@ -95,7 +95,7 @@
         :overlay="false"
         v-model:open="settingsRef"
         :ui="{
-          content: 'bg-transparent',
+          content: 'bg-transparent w-auto max-w-none mx-auto',
         }"
       >
         <UTooltip text="Settings">

@@ -31,7 +31,11 @@ export const initDatabase = async () => {
 
   await sqlite3.exec(
     db,
-    "PRAGMA locking_mode=exclusive; PRAGMA journal_mode=wal;",
+    [
+      "PRAGMA locking_mode=exclusive;",
+      "PRAGMA journal_mode=wal;",
+      "PRAGMA synchronous = NORMAL;",
+    ].join(""),
   );
 
   // Initialize threads table

@@ -40,6 +40,8 @@
 <script setup lang="ts">
 const promptStore = usePromptStore();
 const { currentModel } = storeToRefs(promptStore);
+const modelStore = useModelStore();
+const { models } = storeToRefs(modelStore);
 
 const icons = ref([
   {
@@ -84,79 +86,13 @@ const icons = ref([
   },
 ]);
 
-const models = [
-  {
-    label: "Gemini 2.5 Flash",
-    apiModel: "google/gemini-2.5-flash",
-    imageUploads: true,
-    webSearch: true,
-    pdfUploads: true,
-    reasoningAbility: true,
-    generateImage: false,
-  },
-  {
-    label: "Gemini 2.5 Pro Preview 06-05",
-    apiModel: "google/gemini-2.5-pro-preview-06-05",
-    imageUploads: true,
-    webSearch: true,
-    pdfUploads: true,
-    reasoningAbility: true,
-    generateImage: false,
-  },
-  {
-    label: "Gemini 2.0 Flash Experimental (free)",
-    apiModel: "google/gemini-2.0-flash-exp:free",
-    imageUploads: true,
-    webSearch: false,
-    pdfUploads: true,
-    reasoningAbility: false,
-    generateImage: false,
-  },
-  {
-    label: "o4 mini",
-    apiModel: "openai/o4-mini",
-    imageUploads: true,
-    webSearch: false,
-    pdfUploads: false,
-    reasoningAbility: true,
-    generateImage: false,
-  },
-  {
-    label: "Claude 4 Sonnet",
-    apiModel: "anthropic/claude-sonnet-4",
-    imageUploads: true,
-    webSearch: false,
-    pdfUploads: true,
-    reasoningAbility: true,
-    generateImage: false,
-  },
-  {
-    label: "DeepSeek: R1 0528 (free)",
-    apiModel: "deepseek/deepseek-r1-0528:free",
-    imageUploads: false,
-    webSearch: false,
-    pdfUploads: false,
-    reasoningAbility: true,
-    generateImage: false,
-  },
-  {
-    label: "DeepSeek: R1 Distill Qwen 14B (free)",
-    apiModel: "deepseek/deepseek-r1-distill-qwen-14b:free",
-    imageUploads: false,
-    webSearch: false,
-    pdfUploads: false,
-    reasoningAbility: true,
-    generateImage: false,
-  },
-];
-
 const getModelIcons = (model: any) => {
   return icons.value.filter((icon) => model[icon.ability]);
 };
 
 const emit = defineEmits(["changeModel"]);
 const changeModel = (model: string) => {
-  const newModel = models.find((m) => m.label === model);
+  const newModel = models.value.find((m) => m.label === model);
   if (newModel) {
     emit("changeModel", newModel);
   }

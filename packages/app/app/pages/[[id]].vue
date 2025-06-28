@@ -3,8 +3,16 @@
     <div
       class="flex flex-col items-center justify-center min-h-screen text-center gap-5"
     >
-      <h1 class="text-4xl font-bold">404 - Chat Not Found</h1>
-      <UButton label="New Chat" variant="subtle" size="lg" to="/" />
+      <VueSpinnerTail
+        v-if="waiting"
+        class="w-8 lg:w-15 h-20 text-neutral-500"
+      />
+      <div v-if="!waiting" class="space-y-3">
+        <h1 class="lg:text-lg">
+          This chat may have been deleted or doesnt exist.
+        </h1>
+        <UButton label="New Chat" variant="subtle" size="lg" to="/" />
+      </div>
     </div>
   </div>
 
@@ -33,11 +41,7 @@
             >
           </div>
 
-          <ChatPrompt
-            @send="sendMessage"
-            @model-change="handleModelChange"
-            @thinking-budget-change="handleThinkingBudgetChange"
-          />
+          <ChatPrompt @send="sendMessage" />
 
           <!-- Show example prompts or questions based on selection -->
           <Transition name="pop">
@@ -146,12 +150,7 @@
       </div>
 
       <UContainer class="max-w-4xl px-1.5">
-        <ChatPrompt
-          :bottom="true"
-          @send="sendMessage"
-          @model-change="handleModelChange"
-          @thinking-budget-change="handleThinkingBudgetChange"
-        />
+        <ChatPrompt :bottom="true" @send="sendMessage" />
       </UContainer>
     </div>
   </div>
@@ -162,10 +161,20 @@ definePageMeta({
   layout: "chat",
 });
 
+import { VueSpinnerTail } from "vue3-spinners";
+
 const route = useRoute();
 const threadsStore = useThreadsStore();
 const promptStore = usePromptStore();
 const { $sync } = useNuxtApp();
+
+const waiting = ref(true);
+const currentThreadId = computed(() => route.params.id?.toString() || "");
+onMounted(() =>
+  setTimeout(() => {
+    waiting.value = false;
+  }, 3000),
+);
 
 onMounted(async () => {
   const endpoint = useRuntimeConfig().public.apiUrl;
@@ -251,18 +260,8 @@ watch(
   { immediate: true },
 );
 
-const currentThreadId = computed(() => route.params.id?.toString() || "");
-
 const { currentModel, thinkingBudget, attachmentFiles } =
   storeToRefs(promptStore);
-
-const handleModelChange = (model: any) => {
-  promptStore.setCurrentModel(model);
-};
-
-const handleThinkingBudgetChange = (budget: string) => {
-  promptStore.setThinkingBudget(budget);
-};
 
 const sendingMessage = ref(false);
 const sendMessage = async (text: string) => {
@@ -290,7 +289,7 @@ const sendMessage = async (text: string) => {
         });
       }
     }
-    promptStore.setAttachmentFiles([]);
+    promptStore.setAttachmentFiles(undefined, []);
     return uploadedAttachments;
   })();
 
@@ -301,7 +300,7 @@ const sendMessage = async (text: string) => {
     options.name = currentModel.value.apiModel;
   }
   if (thinkingBudget.value && currentModel.value?.reasoningAbility) {
-    options.thinkingBudget = thinkingBudget.value;
+    options.thinkingBudget = thinkingBudget.value.toLowerCase();
   }
   if (!currentThreadId) {
     try {
@@ -332,7 +331,7 @@ const retryMessage = async (messageId: string) => {
       options.name = currentModel.value.apiModel;
     }
     if (thinkingBudget.value && currentModel.value?.reasoningAbility) {
-      options.thinkingBudget = thinkingBudget.value;
+      options.thinkingBudget = thinkingBudget.value.toLowerCase();
     }
     await $sync.retryMessage(messageId, options);
   } catch (error) {

@@ -114,6 +114,9 @@ const props = withDefaults(defineProps<ChatMessageProps>(), {
   showTimestamp: false,
 });
 const emit = defineEmits(["retryMessage", "branchThread"]);
+const promptStore = usePromptStore();
+const { responseStreaming } = storeToRefs(promptStore);
+
 const { $sync } = useNuxtApp();
 
 const editUserMessage = ref(false);
@@ -136,7 +139,7 @@ const saveMessage = async () => {
   if (newContent && newContent !== props.message.content) {
     try {
       await $sync.updateMessage(props.message.id, {
-        data: { ...props.message.data, content: newContent },
+        data: { ...toRaw(props.message.data), content: newContent },
       });
       showToast("Message updated successfully");
     } catch (error) {
@@ -146,8 +149,8 @@ const saveMessage = async () => {
   editUserMessage.value = false;
 };
 
-const updateUserMessage = (event: any) => {
-  editedMessageContent.value = event.target.value;
+const updateUserMessage = (value: string) => {
+  editedMessageContent.value = value;
 };
 
 const openDeleteModal = ref(false);
@@ -173,7 +176,7 @@ const userMessageActions = computed(() => [
       ]
     : []),
   {
-    icon: "carbon:branch",
+    icon: "i-carbon:branch",
     tooltip: "Branch off",
     action: () => {
       emit("branchThread", props.message.id);
@@ -215,7 +218,8 @@ const assistantMessageActions = computed(() => [
     },
   },
   props.message &&
-    !props.message.stream_id && {
+    !props.message.stream_id &&
+    !responseStreaming.value && {
       icon: "i-lucide:refresh-ccw",
       tooltip: "Retry message",
       action: () => {
