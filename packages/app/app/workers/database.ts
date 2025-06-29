@@ -25,9 +25,9 @@ export const initDatabase = async () => {
   isStarting = true;
   const module = await SQLiteESMFactory();
   sqlite3 = SQLite.Factory(module);
-  const vfs = await AccessHandlePoolVFS.create("hello", module);
+  const vfs = await AccessHandlePoolVFS.create("ahp", module);
   sqlite3.vfs_register(vfs, true);
-  db = await sqlite3.open_v2("one");
+  db = await sqlite3.open_v2("mydb");
 
   await sqlite3.exec(
     db,
@@ -114,7 +114,7 @@ export const initDatabase = async () => {
     CREATE VIRTUAL TABLE IF NOT EXISTS threads_fts USING fts5(
       title,
       messages_content,
-      thread_id UNINDEXED,
+      thread_id,
     );
   `,
   );
@@ -199,8 +199,9 @@ export const initDatabase = async () => {
   await sqlite3.exec(
     db,
     `
-      INSERT INTO threads_fts (title, messages_content)
+      INSERT INTO threads_fts (thread_id, title, messages_content)
       SELECT
+        t.id,
         t.title,
         COALESCE(GROUP_CONCAT(m.content, ' '), '')
       FROM
@@ -217,12 +218,6 @@ export const initDatabase = async () => {
   console.log("db ready!");
   dbReadyResolvers.forEach((resolve) => resolve());
   dbReadyResolvers = [];
-  console.log(
-    await dbExec({
-      sql: "SELECT title, messages_content FROM threads_fts WHERE threads_fts = 'hell*';",
-      bindings: undefined,
-    }),
-  );
 };
 
 export const dbExec = async ({
