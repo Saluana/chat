@@ -19,6 +19,11 @@ function waitForSync(): Promise<void> {
   });
 }
 
+const sanitizeFtsTerm = (term: string): string => {
+  const escapedTerm = term.replace(/"/g, '""');
+  return `"${escapedTerm}"`;
+};
+
 function mapRowToThread(rowArray: any[], columnNames: string[]): Thread {
   const rowObj = columnNames.reduce((acc, name, idx) => {
     acc[name] = rowArray[idx];
@@ -431,6 +436,25 @@ export function syncServiceProvider() {
       });
       const thread = rows[0] ? mapRowToThread(rows[0], THREAD_COLUMNS) : null;
       return thread;
+    },
+    async searchThreads(query: string): Promise<any[]> {
+      const ftsQuery = query
+        .trim()
+        .split(/\s+/)
+        .filter((term) => term.length > 0)
+        .map((term) => {
+          const sanitized = sanitizeFtsTerm(term);
+          return `${sanitized}`;
+        })
+        .join(" AND ");
+      const { rows } = await dbExec({
+        sql: `SELECT t.* FROM threads AS t JOIN threads_fts AS fts ON t.id = fts.thread_id
+              WHERE fts.threads_fts MATCH ? AND t.deleted = 0
+              ORDER BY fts.rank;`,
+        bindings: [ftsQuery],
+      });
+      const threads = rows.map((row) => mapRowToThread(row, THREAD_COLUMNS));
+      return threads;
     },
     async getMessage(messageId: string): Promise<any | null> {
       const { rows } = await dbExec({

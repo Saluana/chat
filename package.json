@@ -13,5 +13,11 @@
   },
   "dependencies": {
     "alchemy": "^0.40.1"
-  }
+  },
+  "trustedDependencies": [
+    "@nuxflare-chat/app",
+    "@parcel/watcher",
+    "@swc/core",
+    "@tailwindcss/oxide"
+  ]
 }

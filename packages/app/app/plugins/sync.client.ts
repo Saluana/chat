@@ -128,6 +128,10 @@ export default defineNuxtPlugin({
             await isSyncReady();
             return await sharedService.proxy["updateMessage"]!(id, update);
           },
+          async searchThreads(query: string) {
+            await isReady();
+            return await sharedService.proxy["searchThreads"]!(query);
+          },
         },
       },
     };

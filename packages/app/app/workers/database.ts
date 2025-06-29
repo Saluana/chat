@@ -9,6 +9,29 @@ let db: number;
 let dbReadyResolvers: Array<() => void> = [];
 let isDbReady = false;
 
+async function clearDirectoryRecursive(
+  directoryHandle: FileSystemDirectoryHandle,
+) {
+  for await (const entry of directoryHandle.values()) {
+    if (entry.kind === "file") {
+      await directoryHandle.removeEntry(entry.name);
+    } else if (entry.kind === "directory") {
+      await clearDirectoryRecursive(entry);
+      await directoryHandle.removeEntry(entry.name);
+    }
+  }
+}
+
+async function clearAllOPFSStorage() {
+  try {
+    const rootDirHandle = await navigator.storage.getDirectory();
+    await clearDirectoryRecursive(rootDirHandle);
+  } catch (error) {
+    console.error("Error clearing OPFS storage:", error);
+    throw error;
+  }
+}
+
 export const waitForDatabase = async () => {
   if (isDbReady) {
     return Promise.resolve();
@@ -23,17 +46,27 @@ let isStarting = false;
 export const initDatabase = async () => {
   if (isStarting) return;
   isStarting = true;
+
+  // force clear opfs on breaking updates
+  const updateId = "one";
+  if ((await kvStore.get("clear")) !== updateId) {
+    console.log("clearing opfs...");
+    await clearAllOPFSStorage();
+    await kvStore.set("clear", updateId);
+    console.log("clearing opfs... done.");
+  }
+
   const module = await SQLiteESMFactory();
   sqlite3 = SQLite.Factory(module);
-  const vfs = await AccessHandlePoolVFS.create("hello", module);
+  const vfs = await AccessHandlePoolVFS.create("ahp", module);
   sqlite3.vfs_register(vfs, true);
-  db = await sqlite3.open_v2("db");
+  db = await sqlite3.open_v2("mydb");
 
   await sqlite3.exec(
     db,
     [
-      "PRAGMA locking_mode=exclusive;",
-      "PRAGMA journal_mode=wal;",
+      "PRAGMA locking_mode = exclusive;",
+      "PRAGMA journal_mode = wal;",
       "PRAGMA synchronous = NORMAL;",
     ].join(""),
   );
@@ -107,6 +140,124 @@ export const initDatabase = async () => {
     db,
     `INSERT OR IGNORE INTO clock (id, clock) VALUES (1, 0);`,
   );
+
+  let checkFTS = false;
+  await sqlite3.exec(
+    db,
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='threads_fts';",
+    (row) => {
+      if (row[0] === "threads_fts") checkFTS = true;
+    },
+  );
+
+  await sqlite3.exec(
+    db,
+    `
+    CREATE VIRTUAL TABLE IF NOT EXISTS threads_fts USING fts5(
+      title,
+      messages_content,
+      thread_id,
+    );
+  `,
+  );
+
+  // Triggers to keep threads_fts in sync with the threads table
+  await sqlite3.exec(
+    db,
+    `
+    -- When a new thread is created, insert a corresponding row into the FTS table.
+    -- The messages_content is initially empty.
+    CREATE TRIGGER IF NOT EXISTS threads_after_insert
+    AFTER INSERT ON threads
+    BEGIN
+      INSERT INTO threads_fts(thread_id, title, messages_content)
+      VALUES (new.id, new.title, '');
+    END;
+
+    -- When a thread is deleted, delete its FTS entry.
+    CREATE TRIGGER IF NOT EXISTS threads_after_delete
+    AFTER DELETE ON threads
+    BEGIN
+      DELETE FROM threads_fts WHERE thread_id = old.id;
+    END;
+
+    -- When a thread's title is updated, update the FTS entry.
+    CREATE TRIGGER IF NOT EXISTS threads_after_update
+    AFTER UPDATE OF title ON threads
+    BEGIN
+      UPDATE threads_fts SET title = new.title WHERE thread_id = new.id;
+    END;
+  `,
+  );
+
+  // Triggers to keep threads_fts in sync with the messages table
+  await sqlite3.exec(
+    db,
+    `
+    -- A helper function to rebuild the messages_content for a given thread.
+    -- This is the most robust way to handle message INSERT, UPDATE, and DELETE.
+    CREATE TRIGGER IF NOT EXISTS messages_after_insert
+    AFTER INSERT ON messages
+    BEGIN
+      UPDATE threads_fts
+      SET messages_content = (
+        SELECT GROUP_CONCAT(content, ' ')
+        FROM messages
+        WHERE thread_id = new.thread_id
+      )
+      WHERE thread_id = new.thread_id;
+    END;
+
+    -- When a message is updated, rebuild the content for the entire thread.
+    CREATE TRIGGER IF NOT EXISTS messages_after_update
+    AFTER UPDATE OF content ON messages
+    BEGIN
+      UPDATE threads_fts
+      SET messages_content = (
+        SELECT GROUP_CONCAT(content, ' ')
+        FROM messages
+        WHERE thread_id = new.thread_id
+      )
+      WHERE thread_id = new.thread_id;
+    END;
+
+    -- When a message is deleted, rebuild the content for the entire thread.
+    CREATE TRIGGER IF NOT EXISTS messages_after_delete
+    AFTER DELETE ON messages
+    BEGIN
+      UPDATE threads_fts
+      SET messages_content = (
+        SELECT GROUP_CONCAT(content, ' ')
+        FROM messages
+        WHERE thread_id = old.thread_id
+      )
+      WHERE thread_id = old.thread_id;
+    END;
+  `,
+  );
+
+  if (!checkFTS) {
+    console.log("rebuilding fts index...");
+    await sqlite3.exec(db, "DELETE FROM threads_fts;");
+    await sqlite3.exec(
+      db,
+      `
+      INSERT INTO threads_fts (thread_id, title, messages_content)
+      SELECT
+        t.id,
+        t.title,
+        COALESCE(GROUP_CONCAT(m.content, ' '), '')
+      FROM
+        threads AS t
+      LEFT JOIN
+        messages AS m ON t.id = m.thread_id
+      GROUP BY
+        t.id;
+    `,
+    );
+    console.log("rebuilding fts index... done.");
+  }
+
   isDbReady = true;
   console.log("db ready!");
   dbReadyResolvers.forEach((resolve) => resolve());
