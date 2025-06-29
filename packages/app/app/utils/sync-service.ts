@@ -444,7 +444,7 @@ export function syncServiceProvider() {
         .filter((term) => term.length > 0)
         .map((term) => {
           const sanitized = sanitizeFtsTerm(term);
-          return `${sanitized}`;
+          return `${sanitized}*`;
         })
         .join(" AND ");
       const { rows } = await dbExec({

@@ -9,6 +9,7 @@
       size: 'xs',
       class: 'rounded-full',
     }"
+    :loading="status === 'pending'"
     icon="i-lucide-search"
     :ui="{
       root: 'p-3 absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full lg:min-w-180 max-h-120 overflow-y-scroll scrollbar-custom bg-neutral-200/30 dark:bg-neutral-700/30 ring-0 ring-neutral-600 backdrop-blur-md shadow-lg rounded-xl',
@@ -70,7 +71,7 @@ const formatThreadTime = (thread: Thread) => {
   }
 };
 
-const { data: searchResults } = await useAsyncData(
+const { data: searchResults, status } = await useAsyncData(
   "search",
   async () => {
     if (!debouncedSearchTerm.value.trim()) return [];
