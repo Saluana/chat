@@ -6,7 +6,7 @@
         v-if="message.stream_id && !reasoning?.length && !content?.length"
         class="w-10"
       />
-      <MarkdownRenderer :content="content" />
+      <MarkdownRenderer :content="content" :chunked="!!message.stream_id" />
       <AssistantErrorMessage
         :error="message.error"
         v-if="!message.stream_id && message.error"

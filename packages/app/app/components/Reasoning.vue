@@ -30,4 +30,9 @@ const items = ref<AccordionItem[]>([
     label: "Reasoning",
   },
 ]);
+
+// preprocess markdown
+onMounted(() => {
+  processMarkdownChunk(content);
+});
 </script>

@@ -21,6 +21,19 @@ export default defineNuxtConfig({
     "@pinia/nuxt",
     "nuxt-workers",
   ],
+  app: {
+    head: {
+      link: [
+        {
+          rel: "stylesheet",
+          href: "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css",
+          integrity:
+            "sha384-5TcZemv2l/9On385z///+d7MSYlvIEw9FuZTIdZ14vJLqWphw7e7ZPuOiCHJcFCP",
+          crossorigin: "anonymous",
+        },
+      ],
+    },
+  },
   runtimeConfig: {
     public: {
       apiUrl: "http://localhost:8787",
