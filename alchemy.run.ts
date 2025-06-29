@@ -56,9 +56,6 @@ const app = await Nuxt("app", {
   main: "./packages/app/.output/server/index.mjs",
   command: `[ -z "$SKIP_BUILD" ] && cd packages/app && NITRO_PRESET=cloudflare-module bun run build || ( [ -n "$SKIP_BUILD" ] && echo "Skipping build." )`,
   assets: "./packages/app/.output/public",
-  bindings: {
-    BLOB: blobsBucket,
-  },
   domains: [
     {
       domainName: domain,
