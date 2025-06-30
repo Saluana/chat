@@ -63,9 +63,9 @@ export const useModelStore = defineStore("model", () => {
     {
       label: "Gemini 2.0 Flash Experimental (free)",
       apiModel: "google/gemini-2.0-flash-exp:free",
-      imageUploads: false,
-      webSearch: false,
-      pdfUploads: false,
+      imageUploads: true,
+      webSearch: true,
+      pdfUploads: true,
       reasoningAbility: false,
       generateImage: false,
       keyPlatforms: ["gemini", "openrouter"],

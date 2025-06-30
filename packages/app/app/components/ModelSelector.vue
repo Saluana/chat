@@ -5,6 +5,7 @@
     color="neutral"
     variant="ghost"
     :items="models"
+    :content="{ align: 'start' }"
     :ui="{
       base: 'w-auto cursor-pointer text-neutral-700 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white light:hover:bg-neutral-200 dark:hover:bg-neutral-700/70',
       label: 'text-xs',
@@ -13,7 +14,6 @@
       item: 'text-neutral-700 dark:text-neutral-400 my-2 data-highlighted:bg-neutral-100 dark:data-highlighted:bg-neutral-800 rounded-md',
       itemTrailingIcon: 'font-bold',
     }"
-    @update:model-value="changeModel"
   >
     <template #item="{ item }">
       <div class="flex items-center justify-between gap-2 w-full">
@@ -91,10 +91,4 @@ const getModelIcons = (model: any) => {
 };
 
 const emit = defineEmits(["changeModel"]);
-const changeModel = (model: string) => {
-  const newModel = models.value.find((m) => m.label === model);
-  if (newModel) {
-    emit("changeModel", newModel);
-  }
-};
 </script>

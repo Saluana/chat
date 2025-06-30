@@ -134,7 +134,6 @@ export const usePromptStore = defineStore("prompt", () => {
   });
 
   function setThinkingBudget(threadId: string) {
-    console.log(threadId, prompts.value[threadId]?.thinkingBudget, "just this");
     thinkingBudget.value = threadId
       ? prompts.value[threadId]?.thinkingBudget || "high"
       : "high";

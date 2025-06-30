@@ -779,6 +779,9 @@ export class Stream extends DurableObject {
         if (name.startsWith("google/") && keys.gemini) {
           return createGoogleGenerativeAI({ apiKey: keys.gemini })(
             baseModelName,
+            {
+              useSearchGrounding: !!options.webSearch,
+            },
           );
         }
         if (name.startsWith("openai/") && keys.openai) {
