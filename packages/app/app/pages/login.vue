@@ -1,7 +1,7 @@
 <template>
   <div
     class="w-screen h-screen flex flex-col gap-10 items-center justify-center"
-    :class="[colorMode.value === 'light' ? 'bg-gradient' : 'bg-gradient-dark']"
+    :class="[gradientClass]"
   >
     <!-- frosted card -->
     <div
@@ -46,7 +46,10 @@ const { url } = await client.authorize(callback, "code", {
   provider: "google",
 });
 const { $sync } = useNuxtApp();
+const gradientClass = ref("bg-gradient");
 onMounted(() => {
+  gradientClass.value =
+    colorMode.value === "light" ? "bg-gradient" : "bg-gradient-dark";
   $sync.clear();
 });
 </script>

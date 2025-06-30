@@ -79,7 +79,7 @@ const api = await Worker("api", {
     BLOB: blobsBucket,
     USER: userDO,
     STREAM: streamDO,
-    AUTH_URL: `auth.${domain}`,
+    AUTH_URL: `https://auth.${domain}`,
     AUTH_CLIENT_ID: authClientID,
   },
 });
