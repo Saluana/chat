@@ -1,5 +1,7 @@
 <template>
-  <div class="prose dark:prose-invert [&>div:first-child>p]:m-0">
+  <div
+    class="prose dark:prose-invert [&>div:last-child>p:last-child]:mb-0 [&>div:first-child>p:first-child]:mt-0"
+  >
     <MarkdownChunkRenderer
       v-for="(b, index) in blocks"
       :key="index"
