@@ -1,7 +1,7 @@
 <template>
   <div v-for="(threads, category) in threads" :key="category" class="space-y-1">
     <h3
-      class="mb-2 flex items-center gap-1 text-[10px] uppercase font-semibold tracking-wide"
+      class="mb-2 flex items-center gap-1 text-xs uppercase font-semibold tracking-wide"
       :class="[
         category.toLowerCase() === 'pinned'
           ? 'text-primary-600/80 dark:text-primary-400/80'

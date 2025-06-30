@@ -3,13 +3,13 @@ import { useThreadsStore } from "./useThreadsStore";
 
 export interface Prompt {
   threadId: string;
-  currentModel: object;
+  currentModel: any;
   thinkingBudget: string;
   webSearch: boolean;
   message: string | null;
   attachmentFiles: File[];
   attachmentTooltip: string;
-  responseStreaming: boolean;
+  uploadingAttachment?: boolean;
 }
 
 export const usePromptStore = defineStore("prompt", () => {
@@ -19,6 +19,19 @@ export const usePromptStore = defineStore("prompt", () => {
 
   const prompts = ref<Record<string, Prompt>>({});
   const defaultModel = modelStore.models[0];
+
+  const uploadingAttachment = ref(false);
+
+  watch(uploadingAttachment, (newValue) => {
+    const threadId = activeThread.value;
+    if (threadId && prompts.value[threadId]) {
+      prompts.value[threadId].uploadingAttachment = newValue;
+    }
+  });
+
+  function setUploadingAttachment(value: boolean) {
+    uploadingAttachment.value = value;
+  }
 
   const { input: message } = useTextareaAutosize();
 
@@ -34,29 +47,54 @@ export const usePromptStore = defineStore("prompt", () => {
   watch(currentModel, (newModel) => {
     const threadId = activeThread.value;
     if (threadId && prompts.value[threadId]) {
-      prompts.value[threadId].currentModel = newModel!;
+      prompts.value[threadId].currentModel = newModel;
       setAttachmentTooltip(threadId);
     }
   });
 
-  function setCurrentModel(threadId: string | null) {
+  function setCurrentModel(threadId: string) {
     currentModel.value = threadId
       ? prompts.value[threadId]?.currentModel || defaultModel
       : defaultModel;
   }
 
-  watch(activeThread, (newThreadId) => {
-    if (newThreadId) {
-      initializePromptsFromThreads(newThreadId);
-    }
+  const newChatId = ref("");
 
-    setCurrentModel(newThreadId);
-    setAttachmentTooltip(newThreadId);
-    setThinkingBudget(newThreadId);
-    toggleWebSearch(newThreadId);
-    setResponseStreaming(newThreadId);
-    setAttachmentFiles(newThreadId);
-    setMessage(newThreadId);
+  function removeNewChatFromPrompts() {
+    // if(newChatId.value === '') return;
+    delete prompts.value?.[newChatId.value];
+    newChatId.value = "";
+  }
+
+  watch(activeThread, (newThreadId) => {
+    if (newThreadId && !newThreadId.split("-").includes("new")) {
+      initializePromptsFromThreads(newThreadId);
+    } else {
+      // first step
+      if (!newChatId.value) {
+        newChatId.value = `new-${crypto.randomUUID()}`;
+        prompts.value[newChatId.value] = {
+          threadId: newChatId.value,
+          currentModel: defaultModel,
+          thinkingBudget: "high",
+          webSearch: false,
+          message: null,
+          attachmentFiles: [],
+          attachmentTooltip:
+            "Add an attachment\nAccepts: Text, PNG, JPEG, GIF, PDF",
+        };
+        activeThread.value = newChatId.value;
+      } else {
+        const chatId = newChatId.value;
+        activeThread.value = newChatId.value;
+        setCurrentModel(chatId);
+        setAttachmentTooltip(chatId);
+        setThinkingBudget(chatId);
+        setWebSearch(chatId);
+        setAttachmentFiles(chatId);
+        setMessage(chatId);
+      }
+    }
   });
 
   const thinkingBudget = ref("high");
@@ -95,40 +133,20 @@ export const usePromptStore = defineStore("prompt", () => {
     }
   });
 
-  const responseStreaming = ref(false);
-
-  watch(responseStreaming, (newStreaming) => {
-    const threadId = activeThread.value;
-    if (threadId && prompts.value[threadId]) {
-      prompts.value[threadId].responseStreaming = newStreaming;
-    }
-  });
-
-  function toggleResponseStreaming(value?: boolean) {
-    if (value) {
-      responseStreaming.value = value;
-    } else {
-      responseStreaming.value = !responseStreaming.value;
-    }
-  }
-
-  function setResponseStreaming(threadId?: string | null) {
-    const currentThreadId = threadId || activeThread.value;
-    responseStreaming.value = currentThreadId
-      ? prompts.value[currentThreadId]?.responseStreaming || false
-      : false;
-  }
-
-  function setThinkingBudget(threadId: string | null) {
+  function setThinkingBudget(threadId: string) {
+    console.log(threadId, prompts.value[threadId]?.thinkingBudget, "just this");
     thinkingBudget.value = threadId
       ? prompts.value[threadId]?.thinkingBudget || "high"
       : "high";
   }
 
-  function toggleWebSearch(threadId?: string | null) {
-    const currentThreadId = threadId || activeThread.value;
-    webSearch.value = currentThreadId
-      ? (prompts.value[currentThreadId]?.webSearch ?? false)
+  function toggleWebSearch() {
+    webSearch.value = !webSearch.value;
+  }
+
+  function setWebSearch(threadId?: string | null) {
+    webSearch.value = threadId
+      ? prompts.value[threadId]?.webSearch || false
       : false;
   }
 
@@ -140,15 +158,15 @@ export const usePromptStore = defineStore("prompt", () => {
     message.value = "";
   }
 
-  function setAttachmentFiles(threadId?: string | null, newFiles?: File[]) {
+  function setAttachmentFiles(threadId?: string | null) {
     const currentThreadId = threadId || activeThread.value;
-    if (newFiles) {
-      attachmentFiles.value = newFiles;
-    } else {
-      attachmentFiles.value = currentThreadId
-        ? prompts.value[currentThreadId]?.attachmentFiles || []
-        : [];
-    }
+    attachmentFiles.value = currentThreadId
+      ? prompts.value[currentThreadId]?.attachmentFiles || []
+      : [];
+  }
+
+  function addAttachmentFile(file: File) {
+    attachmentFiles.value.push(file);
   }
 
   function removeAttachmentFile(index: number) {
@@ -188,6 +206,7 @@ export const usePromptStore = defineStore("prompt", () => {
 
     // Check if thread already exists in prompts
     if (prompts.value[threadId]) {
+      resetValues(threadId);
       return;
     }
 
@@ -203,18 +222,27 @@ export const usePromptStore = defineStore("prompt", () => {
         if (messagesList && messagesList.value.length > 0) {
           const lastMessage = messagesList.value[messagesList.value.length - 1];
 
+          const chatId = newChatId.value;
           // Extract values with defaults
-          let currentModel = defaultModel;
-          if (lastMessage.current_model && models) {
+          let currentModel =
+            prompts.value[chatId]?.currentModel || defaultModel;
+          if (lastMessage.data.modelOptions && models) {
             const matchedModel = models.find(
-              (model) => model.label === lastMessage.current_model,
+              (model) => model.label === lastMessage.data.modelOptions.name,
             );
             if (matchedModel) {
               currentModel = matchedModel;
             }
           }
-          const thinkingBudget = lastMessage.thinking_budget || "high";
-          const webSearch = lastMessage.web_search ?? false;
+
+          const thinkingBudget =
+            lastMessage.data?.modelOptions?.thinkingBudget ||
+            prompts.value[chatId]?.thinkingBudget ||
+            "high";
+          const webSearch =
+            lastMessage.data?.modelOptions?.webSearch ||
+            prompts.value[chatId]?.webSearch ||
+            false;
 
           // Initialize or update prompt object
           prompts.value[threadId] = {
@@ -224,12 +252,33 @@ export const usePromptStore = defineStore("prompt", () => {
             webSearch,
             message: null,
             attachmentFiles: [],
-            attachmentTooltip: "Add an attachment",
-            responseStreaming: false,
+            attachmentTooltip:
+              prompts.value[chatId]?.attachmentTooltip || "Add an attachment",
           };
+
+          resetValues(threadId);
+          removeNewChatFromPrompts();
+        } else {
+          resetMessage();
+          clearAttachmentFiles();
+          const chatId = newChatId.value;
+          setCurrentModel(chatId);
+          setAttachmentTooltip(chatId);
+          setThinkingBudget(chatId);
+          setWebSearch(chatId);
+          setAttachmentFiles(chatId);
         }
       });
     }
+  }
+
+  function resetValues(threadId: string) {
+    setCurrentModel(threadId);
+    setAttachmentTooltip(threadId);
+    setThinkingBudget(threadId);
+    setWebSearch(threadId);
+    setAttachmentFiles(threadId);
+    setMessage(threadId);
   }
 
   return {
@@ -240,17 +289,19 @@ export const usePromptStore = defineStore("prompt", () => {
     message,
     attachmentFiles,
     attachmentTooltip,
-    responseStreaming,
+    uploadingAttachment,
+    setUploadingAttachment,
+    removeNewChatFromPrompts,
     setCurrentModel,
     setThinkingBudget,
     toggleWebSearch,
     setMessage,
     resetMessage,
     setAttachmentFiles,
+    addAttachmentFile,
     removeAttachmentFile,
     clearAttachmentFiles,
     setAttachmentTooltip,
-    toggleResponseStreaming,
     initializePromptsFromThreads,
   };
 });

@@ -124,6 +124,7 @@ const actions = [
     name: "Settings",
     action: () => {
       settingsRef.value = true;
+      popperOpen.value = false;
     },
   },
   {

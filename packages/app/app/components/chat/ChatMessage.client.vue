@@ -3,6 +3,42 @@
     <!-- User message -->
     <div v-if="message.role === 'user'" class="flex justify-end mb-2 group">
       <div class="flex flex-col items-end space-y-2 w-full">
+        <!-- show attachment files -->
+        <div
+          v-if="
+            message.data?.attachments && message.data.attachments.length > 0
+          "
+          class="max-w-[80%] ml-auto flex justify-end flex-wrap gap-2 mb-2"
+        >
+          <div
+            v-for="attachment in message.data.attachments"
+            :key="attachment.id"
+            class="flex items-stretch gap-2 px-3 py-2 rounded-lg ring-1 ring-neutral-300 dark:ring-neutral-700"
+          >
+            <div
+              class="rounded-lg bg-primary-600/80 flex items-center justify-center w-10 h-10"
+            >
+              <Icon
+                :name="
+                  attachment.type.startsWith('image/')
+                    ? 'i-lucide:image'
+                    : 'i-lucide:file'
+                "
+                class="size-4.5 text-white"
+              />
+            </div>
+
+            <div class="flex flex-col items-start dark:text-neutral-300 gap-1">
+              <span class="text-sm font-medium truncate max-w-[200px]">
+                {{ attachment.name }}
+              </span>
+              <span class="text-xs font-light uppercase">{{
+                attachment.type.split("/")[1]
+              }}</span>
+            </div>
+          </div>
+        </div>
+
         <div
           v-if="!editUserMessage"
           class="max-w-[80%] flex p-3 rounded-lg ring-1 ring-primary-400/30 dark:ring-0 bg-primary-100/50 dark:bg-neutral-500/20"
@@ -61,7 +97,7 @@
 
         <!-- Action icons - shown on hover -->
         <div
-          class="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-100"
+          class="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity duration-100"
         >
           <UTooltip
             v-for="actionItem in assistantMessageActions"
@@ -78,6 +114,7 @@
               @click="actionItem.action"
             />
           </UTooltip>
+          <span class="capitalize text-xs">{{ modelName }}</span>
         </div>
       </div>
     </div>
@@ -101,9 +138,17 @@ interface ChatMessageProps {
 const props = withDefaults(defineProps<ChatMessageProps>(), {
   showTimestamp: false,
 });
+
+const modelName = computed(() => {
+  return props.message.data?.modelOptions?.name
+    .split("/")[1]
+    .split("-")
+    .join(" ");
+});
+
 const emit = defineEmits(["retryMessage", "branchThread"]);
-const promptStore = usePromptStore();
-const { responseStreaming } = storeToRefs(promptStore);
+const threadsStore = useThreadsStore();
+const { responseStreaming } = storeToRefs(threadsStore);
 
 const { $sync } = useNuxtApp();
 

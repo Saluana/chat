@@ -49,10 +49,20 @@ const selectedBudget = ref(
 );
 
 watch(
+  thinkingBudget,
+  () => {
+    selectedBudget.value = budgets.value.find(
+      (b) => b.value.toLowerCase() === thinkingBudget.value.toLowerCase(),
+    );
+  },
+  { immediate: true },
+);
+
+watch(
   selectedBudget,
   (newBudget) => {
     if (newBudget) {
-      promptStore.thinkingBudget = newBudget.value;
+      promptStore.thinkingBudget = newBudget.value.toLowerCase();
     }
   },
   { immediate: true },

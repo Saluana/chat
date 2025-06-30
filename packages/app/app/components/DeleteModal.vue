@@ -1,12 +1,12 @@
 <template>
   <UModal
-    :overlay="true"
+    :overlay="false"
     v-model:open="openDeleteModal"
     color="neutral"
     :ui="{
       overlay: 'bg-white/60 dark:bg-black/60',
       content:
-        'bg-neutral-300/30 dark:bg-neutral-700/30 ring-0 ring-neutral-600 backdrop-blur-md shadow-lg rounded-xl',
+        'bg-neutral-100/50 dark:bg-neutral-700/30 backdrop-blur-md rounded-xl',
       header: 'hidden',
       body: ' rounded-lg mx-4 mt-4 border-none',
       footer: 'p-4',

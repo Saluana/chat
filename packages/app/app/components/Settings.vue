@@ -1,21 +1,21 @@
 <template>
   <div
-    class="w-full lg:w-[800px] p-4 lg:p-8 flex flex-col lg:flex-row justify-between items-start gap-5 lg:gap-10 bg-neutral-200/30 dark:bg-neutral-700/30 ring-0 ring-neutral-600 backdrop-blur-md rounded-xl"
+    class="w-full lg:w-[800px] p-4 lg:p-8 flex flex-col lg:flex-row justify-between items-start gap-5 lg:gap-10 bg-neutral-100/40 dark:bg-neutral-700/30 backdrop-blur-md rounded-xl"
   >
     <!-- user -->
     <div class="flex flex-col items-center gap-4 flex-1/3">
       <UAvatar
         :src="image"
-        alt="Komal Tolambia"
+        :alt="name"
         :ui="{
           root: 'w-20 h-20 lg:w-30 lg:h-30 bg-primary-800/80',
           fallback: 'text-white/80',
         }"
       />
       <div class="text-center space-y-1">
-        <p class="font-semibold text-lg">{{ name }}</p>
+        <p class="font-bold text-lg">{{ name }}</p>
         <p
-          class="text-neutral-500 dark:text-neutral-300 flex items-center gap-1"
+          class="text-neutral-800 dark:text-neutral-400 flex items-center gap-1"
         >
           {{ email }}
         </p>
@@ -23,26 +23,24 @@
     </div>
 
     <UAccordion
-      :items="modelsByCategory"
+      :items="Object.values(modelsByCategory)"
       :ui="{
         root: 'w-2/3',
-        item: 'p-2 my-4 rounded-lg ring ring-primary-200 dark:ring-primary-500/70 bg-primary-500/10',
-        trigger: 'cursor-pointer p-1.5',
+        item: 'p-2.5 my-4 rounded-lg ring ring-neutral-300/40 dark:ring-neutral-700/40 bg-white dark:bg-neutral-900',
+        trigger: 'cursor-pointer p-0.5',
         leadingIcon: '',
       }"
     >
       <template #default="{ item }">
         <div class="flex items-center gap-2">
           <img v-if="item.image" src="/openrouter.ico" alt="" class="w-5" />
-          <p class="text-[15px] font-medium dark:text-primary-50">
+          <p class="text-md font-medium dark:text-primary-50">
             {{ item.name }} API Key
           </p>
         </div>
       </template>
       <template #content="{ item }">
-        <div
-          class="bg-white/80 dark:bg-neutral-900 rounded-lg p-4 mx-auto w-full"
-        >
+        <div class="rounded-lg p-4 mx-auto w-full mt-2">
           <!-- show pills here -->
           <div v-if="item.models" class="flex flex-wrap gap-2 mb-4">
             <span
@@ -70,8 +68,8 @@
                 :to="item.link"
                 target="_blank"
                 external
-                class="text-primary-400 hover:text-primary-500"
-                >{{ item.name }} console </NuxtLink
+                class="px-0 text-primary-400 hover:text-primary-500"
+                >{{ item.name }} console</NuxtLink
               >.
             </p>
 

@@ -23,6 +23,28 @@ export const useThreadsStore = defineStore("threads", () => {
   const threads = ref<Record<string, Thread>>({});
   const activeThread = ref<string | null>(null);
   const messages = ref<Record<string, any>>({});
+  const responseStreaming = ref(false);
+  const stopStreaming = ref(false);
+
+  watch(
+    threads,
+    (newThreads) => {
+      if (import.meta.client) {
+        if (activeThread.value) {
+          const thread = newThreads[activeThread.value];
+          if (thread) {
+            responseStreaming.value = thread.status === "streaming";
+            if (thread.status != "streaming") {
+              stopStreaming.value = false;
+            }
+          } else {
+            responseStreaming.value = false;
+          }
+        }
+      }
+    },
+    { deep: true },
+  );
 
   function addMessage(msg: any) {
     messages.value[msg.id as string] = msg;
@@ -167,11 +189,18 @@ export const useThreadsStore = defineStore("threads", () => {
     };
   }
 
+  const activeThreadObject = computed(
+    () => threads.value[activeThread.value || ""] || null,
+  );
+
   return {
     threads,
+    responseStreaming,
+    stopStreaming,
     messages,
     messagesList,
     activeThread,
+    activeThreadObject,
     pinnedThreads,
     unpinnedThreads,
     setThread,

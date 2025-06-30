@@ -1,6 +1,6 @@
 <template>
   <div
-    class="backdrop-blur-md bg-neutral-100/80 dark:bg-neutral-800/60 ring-neutral-300/80 dark:ring-neutral-200/20"
+    class="backdrop-blur-md bg-neutral-100/90 dark:bg-neutral-800/80 ring-neutral-300/80 dark:ring-neutral-200/20"
     :class="[!bottom ? 'rounded-xl ring-1' : 'rounded-t-xl ring-2']"
   >
     <div class="p-2 px-3 rounded-t-xl w-full h-full">
@@ -100,18 +100,23 @@
           :text="
             responseStreaming
               ? 'Stop response generation'
-              : 'Message requires text'
+              : uploadingAttachment
+                ? 'Uploading attachment'
+                : 'Message requires text'
           "
         >
           <UButton
+            :loading="stopStreaming"
             @click="handleSubmit"
             variant="subtle"
             :icon="
-              responseStreaming
+              responseStreaming && !stopStreaming
                 ? 'i-material-symbols:stop-rounded'
                 : 'i-lucide:arrow-up'
             "
-            :disabled="!message.trim() && !responseStreaming"
+            :disabled="
+              (!message.trim() && !responseStreaming) || uploadingAttachment
+            "
             size="md"
             :ui="{
               base: 'disabled:bg-primary-500/50 disabled:dark:bg-primary-400/20 bg-primary-800/80 hover:bg-primary-800/70 dark:bg-primary-700/30 hover:dark:bg-primary-700/20 disabled:dark:text-white/40 text-white/80',
@@ -135,18 +140,20 @@
 
 <script setup lang="ts">
 const promptStore = usePromptStore();
-const { message } = storeToRefs(promptStore);
-const { responseStreaming } = storeToRefs(promptStore);
+const { message, uploadingAttachment } = storeToRefs(promptStore);
+
+const threadsStore = useThreadsStore();
+const { responseStreaming, stopStreaming } = storeToRefs(threadsStore);
+
 const emit = defineEmits(["send"]);
 
 const handleSubmit = () => {
   if (responseStreaming.value) {
-    promptStore.toggleResponseStreaming();
-    // logic for stopping the response generation
+    stopStreaming.value = true;
+    // TODO: logic for stopping the response generation
   } else {
     if (message.value.trim()) {
       emit("send", message.value);
-      promptStore.resetMessage();
     }
   }
 };

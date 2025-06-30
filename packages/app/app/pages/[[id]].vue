@@ -1,15 +1,12 @@
 <template>
-  <div v-if="!messagesList.length && currentThreadId">
+  <div v-if="currentThreadId && !(activeThreadObject?.deleted === false)">
     <div
       class="flex flex-col items-center justify-center min-h-screen text-center gap-5"
     >
-      <VueSpinnerTail
-        v-if="waiting"
-        class="w-8 lg:w-15 h-20 text-neutral-500"
-      />
+      <LoaderSpin :size="10" />
       <div v-if="!waiting" class="space-y-3">
         <h1 class="lg:text-lg">
-          This chat may have been deleted or doesnt exist.
+          This chat may have been deleted or may not exist.
         </h1>
         <UButton label="New Chat" variant="subtle" size="lg" to="/" />
       </div>
@@ -124,6 +121,16 @@
             @retryMessage="() => retryMessage(message.id)"
             @branchThread="() => branchThread(message.id)"
           />
+
+          <div
+            v-if="uploadingAttachment && currentThreadId"
+            class="max-w-[80%] ml-auto flex items-center justify-between gap-2 p-3 rounded-lg ring-1 ring-primary-400/30 dark:ring-0 bg-primary-100/50 dark:bg-neutral-500/20"
+          >
+            <LoaderSpin :size="5" />
+            <div class="text-blue-700 dark:text-blue-300">
+              Uploading files & sending...
+            </div>
+          </div>
         </div>
       </UContainer>
     </div>
@@ -160,16 +167,16 @@
 definePageMeta({
   layout: "chat",
 });
-
-import { VueSpinnerTail } from "vue3-spinners";
-
 const route = useRoute();
 const threadsStore = useThreadsStore();
+const { messagesList, activeThreadObject } = storeToRefs(threadsStore);
 const promptStore = usePromptStore();
+const { uploadingAttachment } = storeToRefs(promptStore);
 const { $sync } = useNuxtApp();
 
 const waiting = ref(true);
 const currentThreadId = computed(() => route.params.id?.toString() || "");
+
 onMounted(() =>
   setTimeout(() => {
     waiting.value = false;
@@ -186,7 +193,6 @@ onMounted(async () => {
   }
 });
 
-const { messagesList } = storeToRefs(threadsStore);
 const session = useAuth().sessionState;
 const userName = computed(() => session.value.user?.name.split(" ")[0]);
 
@@ -260,14 +266,15 @@ watch(
   { immediate: true },
 );
 
-const { currentModel, thinkingBudget, attachmentFiles } =
+const { currentModel, thinkingBudget, webSearch, attachmentFiles, message } =
   storeToRefs(promptStore);
 
-const sendingMessage = ref(false);
 const sendMessage = async (text: string) => {
-  sendingMessage.value = true;
-
   const attachments = await (async () => {
+    if (attachmentFiles.value.length) {
+      promptStore.setUploadingAttachment(true);
+    }
+
     const uploadedAttachments = [];
     if (attachmentFiles.value.length) {
       for (const file of attachmentFiles.value) {
@@ -289,7 +296,6 @@ const sendMessage = async (text: string) => {
         });
       }
     }
-    promptStore.setAttachmentFiles(undefined, []);
     return uploadedAttachments;
   })();
 
@@ -301,6 +307,9 @@ const sendMessage = async (text: string) => {
   }
   if (thinkingBudget.value && currentModel.value?.reasoningAbility) {
     options.thinkingBudget = thinkingBudget.value.toLowerCase();
+  }
+  if (webSearch.value && currentModel.value?.webSearch) {
+    options.webSearch = webSearch.value;
   }
   if (!currentThreadId) {
     try {
@@ -321,7 +330,9 @@ const sendMessage = async (text: string) => {
       options,
     });
   }
-  sendingMessage.value = false;
+  promptStore.resetMessage();
+  promptStore.clearAttachmentFiles();
+  promptStore.setUploadingAttachment(false);
 };
 
 const retryMessage = async (messageId: string) => {
@@ -357,7 +368,7 @@ onMounted(() => {
 });
 
 watch(
-  messagesList,
+  [messagesList, message, attachmentFiles],
   () => {
     nextTick(() => {
       handleScroll();

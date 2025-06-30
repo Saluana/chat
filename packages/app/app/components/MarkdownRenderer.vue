@@ -1,6 +1,6 @@
 <template>
   <div
-    class="prose dark:prose-invert [&>div:last-child>p:last-child]:mb-0 [&>div:first-child>p:first-child]:mt-0"
+    class="prose dark:prose-invert [&>div:last-child>p:last-child]:mb-0 [&>div:first-child>p:first-child]:mt-0 overflow-x-auto"
   >
     <MarkdownChunkRenderer
       v-for="(b, index) in blocks"

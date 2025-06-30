@@ -12,11 +12,13 @@
     :loading="status === 'pending'"
     icon="i-lucide-search"
     :ui="{
-      root: 'p-3 absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full lg:min-w-180 max-h-120 overflow-y-scroll scrollbar-custom bg-neutral-200/30 dark:bg-neutral-700/30 ring-0 ring-neutral-600 backdrop-blur-md shadow-lg rounded-xl',
+      root: 'p-3 absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 w-full lg:min-w-180 max-h-120 overflow-y-auto bg-neutral-100/70 ring ring-neutral-200 dark:ring-neutral-800 dark:bg-neutral-700/30 backdrop-blur-md shadow-lg rounded-xl',
       content:
-        'bg-white/80 dark:bg-neutral-900 rounded-lg p-1.5 mx-auto w-full',
+        'bg-white/80 dark:bg-neutral-900 rounded-lg p-1.5 mx-auto w-full scrollbar-custom',
       label: 'text-neutral-400',
       item: 'p-3 rounded-sm hover:bg-neutral-200 dark:hover:bg-neutral-800',
+      input:
+        '[&>input]:placeholder-neutral-600 dark:[&>input]:placeholder-neutral-400',
     }"
     @update:model-value="onSelect"
   >
