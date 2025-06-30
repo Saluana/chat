@@ -45,6 +45,8 @@ export const markdownProcessor = unified()
   .use(remarkMath)
   .use(remarkRehype)
   .use(rehypeShiki, {
+    defaultLanguage: "txt",
+    fallbackLanguage: "txt",
     themes: {
       light: "vitesse-light",
       dark: "vitesse-dark",
