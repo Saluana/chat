@@ -320,35 +320,43 @@ export class User extends DurableObject {
             }
           }
 
-          const formattedMessages = await Promise.all(
-            messages.map(async (msg: any) => {
-              const data = msg.data;
-              const content: any[] = [];
-              if (data?.content) {
-                content.push({ type: "text", text: data.content });
-              }
-              if (data?.attachments) {
-                for (const attachment of data.attachments) {
-                  const blob = await this.#getBlob(attachment.id);
-                  const isPDF = attachment.type === "application/pdf";
-                  if (blob) {
-                    content.push({
-                      type: isPDF ? "file" : "image",
-                      ...(isPDF
-                        ? {
-                            data: await blob.arrayBuffer(),
-                            mimeType: attachment.type,
-                          }
-                        : { image: await blob.arrayBuffer() }),
-                    });
+          const formattedMessages = (
+            await Promise.all(
+              messages.map(async (msg: any) => {
+                const data = msg.data;
+                const content: any[] = [];
+                if (data?.content) {
+                  content.push({ type: "text", text: data.content });
+                }
+                if (data?.attachments) {
+                  for (const attachment of data.attachments) {
+                    try {
+                      const blob = await this.#getBlob(attachment.id);
+                      const isPDF = attachment.type === "application/pdf";
+                      if (blob) {
+                        const attachmentObj = {
+                          type: isPDF ? "file" : "image",
+                          ...(isPDF
+                            ? {
+                                data: await blob.arrayBuffer(),
+                                mimeType: attachment.type,
+                              }
+                            : { image: await blob.arrayBuffer() }),
+                        };
+                        content.push(attachmentObj);
+                      }
+                    } catch {}
                   }
                 }
-              }
-              return {
-                role: msg.role,
-                content,
-              };
-            }),
+                return {
+                  role: msg.role,
+                  content,
+                };
+              }),
+            )
+          ).filter(
+            (message) =>
+              !!message.content.find((c) => c.type === "text" && c.text),
           );
 
           let message: any;
@@ -515,7 +523,34 @@ export class User extends DurableObject {
                 console.error("Error getting partial response:", e);
               }
 
-              // TODO: handle more specific error messages?
+              let errorMsg = "An error occurred while generating the message";
+              let errorType = "StreamError";
+
+              if (error instanceof Error) {
+                if (error.message.includes("API key")) {
+                  errorMsg = error.message;
+                  errorType = "APIKeyError";
+                } else if (
+                  error.message.includes("rate limit") ||
+                  error.message.includes("quota")
+                ) {
+                  errorMsg = "Rate limit exceeded. Please try again later.";
+                  errorType = "RateLimitError";
+                } else if (error.message.includes("timeout")) {
+                  errorMsg = "Request timed out. Please try again.";
+                  errorType = "TimeoutError";
+                } else if (
+                  error.message.includes("network") ||
+                  error.message.includes("connection")
+                ) {
+                  errorMsg =
+                    "Network error. Please check your connection and try again.";
+                  errorType = "NetworkError";
+                } else {
+                  errorMsg = `Generation failed: ${error.message}`;
+                }
+              }
+
               const errorClock = this.#tick();
               const errorMessage = this.db
                 .update(schema.messages)
@@ -523,10 +558,11 @@ export class User extends DurableObject {
                   data: {
                     content: partialContent,
                     reasoning: partialReasoning,
+                    modelOptions: options,
                   },
                   error: JSON.stringify({
-                    type: "StreamError",
-                    message: "An error occurred while generating the message",
+                    type: errorType,
+                    message: errorMsg,
                   }),
                   stream_id: null,
                   clock: errorClock,
@@ -751,7 +787,11 @@ export class Stream extends DurableObject {
         if (name.startsWith("anthropic/") && keys.anthropic) {
           return createAnthropic({ apiKey: keys.anthropic })(baseModelName);
         }
-        if (!keys.openrouter) throw new Error("openrouter_api_key is required");
+        if (!keys.openrouter) {
+          throw new Error(
+            `OpenRouter API key is required to use model "${name}". Please set your OpenRouter API key in settings to use this model.`,
+          );
+        }
         return createOpenRouter({ apiKey: keys.openrouter })(options.name);
       };
 
