@@ -1,5 +1,5 @@
 <template>
-  <div class="prose dark:prose-invert" v-html="html" />
+  <div v-html="html" />
 </template>
 
 <script setup lang="ts">
