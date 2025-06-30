@@ -6,7 +6,7 @@ import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./drizzle/migrations";
 import { createClient } from "@openauthjs/openauth/client";
 // @ts-ignore
-import systemPrompt from "./system-prompt.md?raw";
+import systemPrompt from "./system-prompt.md";
 import { subjects, type SubjectUser } from "@nuxflare-chat/common/auth";
 import * as schema from "./schema";
 import { sql } from "drizzle-orm";
@@ -902,7 +902,7 @@ app.use(cors());
 app.use(async (ctx, next) => {
   authUrl = ctx.env.AUTH_URL;
   authClientID = ctx.env.AUTH_CLIENT_ID;
-  next();
+  await next();
 });
 app.get("/stream/:id", async (c) => {
   const binding = c.env.STREAM;

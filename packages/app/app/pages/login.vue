@@ -45,6 +45,10 @@ const colorMode = useColorMode();
 const { url } = await client.authorize(callback, "code", {
   provider: "google",
 });
+const { $sync } = useNuxtApp();
+onMounted(() => {
+  $sync.clear();
+});
 </script>
 
 <style scoped>

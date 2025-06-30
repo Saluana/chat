@@ -132,6 +132,10 @@ export default defineNuxtPlugin({
             await isReady();
             return await sharedService.proxy["searchThreads"]!(query);
           },
+          async clear() {
+            await isReady();
+            return await sharedService.proxy["clear"]!();
+          },
         },
       },
     };

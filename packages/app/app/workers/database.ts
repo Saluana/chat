@@ -191,6 +191,7 @@ const kvStore = new IndexedDBStore<string, string>();
 
 let sqlite3: ReturnType<typeof SQLite.Factory>;
 let db: number;
+let vfs: any;
 
 let dbReadyResolvers: Array<() => void> = [];
 let isDbReady = false;
@@ -208,10 +209,16 @@ async function clearDirectoryRecursive(
   }
 }
 
-async function clearAllOPFSStorage() {
+export async function clearAllOPFSStorage() {
   try {
+    if (db) await sqlite3.close(db);
+    if (vfs) await vfs.close();
+    db = 0;
+    vfs = null;
+    isDbReady = false;
     const rootDirHandle = await navigator.storage.getDirectory();
     await clearDirectoryRecursive(rootDirHandle);
+    console.log("cleared!");
   } catch (error) {
     console.error("Error clearing OPFS storage:", error);
     throw error;
@@ -244,7 +251,7 @@ export const initDatabase = async () => {
 
   const module = await SQLiteESMFactory();
   sqlite3 = SQLite.Factory(module);
-  const vfs = await AccessHandlePoolVFS.create("ahp", module);
+  vfs = await AccessHandlePoolVFS.create("ahp", module);
   sqlite3.vfs_register(vfs, true);
   db = await sqlite3.open_v2("mydb");
 

@@ -651,6 +651,9 @@ export function syncServiceProvider() {
       };
       wsSendFunction?.(JSON.stringify(pushObj));
     },
+    async clear() {
+      await clearAllOPFSStorage();
+    },
   };
   return createSharedServicePort(api);
 }
