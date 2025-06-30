@@ -70,6 +70,17 @@
         "@iconify-json/ri": "^1.2.5",
       },
     },
+    "packages/auth": {
+      "name": "@nuxflare-chat/auth",
+      "version": "0.0.0",
+      "dependencies": {
+        "@nuxflare-chat/common": "workspace:*",
+        "@openauthjs/openauth": "^0.4.3",
+      },
+      "devDependencies": {
+        "@cloudflare/workers-types": "^4.20250628.0",
+      },
+    },
     "packages/common": {
       "name": "@nuxflare-chat/common",
       "version": "0.0.0",
@@ -306,6 +317,8 @@
 
     "@cloudflare/workers-shared": ["@cloudflare/workers-shared@0.17.5", "", { "dependencies": { "mime": "^3.0.0", "zod": "^3.22.3" } }, "sha512-e2tjozEy3/8JnPcddYFuMjW9As+aX0i7egciPE8b+mufS33QCtdFEzZKCK8utFzby0tx9TkxGFLJ+cmSrJ+tLw=="],
 
+    "@cloudflare/workers-types": ["@cloudflare/workers-types@4.20250628.0", "", {}, "sha512-V4HthfhtQU2vTpwLeUic8FTLgGSjglsGZMJc9jKBNYEU/k0A1rE55UgQoTb5blKQdGtpQKfVKs3FROeY/lXmbw=="],
+
     "@colors/colors": ["@colors/colors@1.6.0", "", {}, "sha512-Ir+AOibqzrIsL6ajt3Rz3LskB7OiMVHqltZmspbW/TJuTVuyOMirVqAkjfY6JISiLHgyNqicAC8AyHHGzNd/dA=="],
 
     "@cspotcode/source-map-support": ["@cspotcode/source-map-support@0.8.1", "", { "dependencies": { "@jridgewell/trace-mapping": "0.3.9" } }, "sha512-IchNf6dN4tHoMFIn/7OE8LWZ19Y6q/67Bmf6vnGREv8RSbBVb9LPJxEcnwrcwX6ixSvaiGoomAUvu4YSxXrVgw=="],
@@ -509,6 +522,8 @@
     "@nuxflare-chat/api": ["@nuxflare-chat/api@workspace:packages/api"],
 
     "@nuxflare-chat/app": ["@nuxflare-chat/app@workspace:packages/app"],
+
+    "@nuxflare-chat/auth": ["@nuxflare-chat/auth@workspace:packages/auth"],
 
     "@nuxflare-chat/common": ["@nuxflare-chat/common@workspace:packages/common"],
 

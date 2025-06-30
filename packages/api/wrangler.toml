@@ -20,5 +20,5 @@ bucket_name = "blobs"
 
 [[rules]] 
 type = "Text"
-globs = ["**/*.sql"]
+globs = ["**/*.sql", "**/*.md"]
 fallthrough = true

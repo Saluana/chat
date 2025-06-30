@@ -1,13 +1,13 @@
-import { authUrl, authClientID, subjects } from "@nuxflare-chat/common/auth";
+import { subjects } from "@nuxflare-chat/common/auth";
 import { type Client, createClient } from "@openauthjs/openauth/client";
 import type { H3Event } from "h3";
 
 let _client: Client;
-export const getClient = (_event: H3Event) => {
+export const getClient = (event: H3Event) => {
   if (_client) return _client;
   return (_client = createClient({
-    issuer: authUrl,
-    clientID: authClientID,
+    issuer: useRuntimeConfig(event).public.authUrl,
+    clientID: useRuntimeConfig(event).public.authClientID,
   }));
 };
 

@@ -1,9 +1,5 @@
 import { createClient, type Client } from "@openauthjs/openauth/client";
-import {
-  authClientID,
-  authUrl,
-  type SubjectUser,
-} from "@nuxflare-chat/common/auth";
+import { type SubjectUser } from "@nuxflare-chat/common/auth";
 
 type UserSession = {
   user?: SubjectUser;
@@ -48,8 +44,8 @@ export const useAuth = () => {
   const client = _client
     ? _client
     : (_client = createClient({
-        issuer: authUrl,
-        clientID: authClientID,
+        issuer: useRuntimeConfig().public.authUrl,
+        clientID: useRuntimeConfig().public.authClientID,
       }));
   const callback = useRequestURL().origin + "/api/auth/callback";
   const redirect = useAuthRedirect();

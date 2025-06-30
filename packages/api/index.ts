@@ -5,12 +5,9 @@ import { DurableObject } from "cloudflare:workers";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./drizzle/migrations";
 import { createClient } from "@openauthjs/openauth/client";
-import {
-  subjects,
-  authUrl,
-  authClientID,
-  type SubjectUser,
-} from "@nuxflare-chat/common/auth";
+// @ts-ignore
+import systemPrompt from "./system-prompt.md?raw";
+import { subjects, type SubjectUser } from "@nuxflare-chat/common/auth";
 import * as schema from "./schema";
 import { sql } from "drizzle-orm";
 import * as v from "valibot";
@@ -23,11 +20,14 @@ import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 
+let authUrl: string;
+let authClientID: string;
+
 let _client: ReturnType<typeof createClient>;
 const getClient = () => {
   if (_client) return _client;
   return (_client = createClient({
-    // TODO: update these to read from env, also make sure cert gets memoized correctly in worker?
+    // TODO: make sure cert gets cached correctly in worker?
     issuer: authUrl,
     clientID: authClientID,
   }));
@@ -64,6 +64,8 @@ export class User extends DurableObject {
     this.storage = ctx.storage;
     this.env = env;
     this.db = drizzle(this.storage, { logger: false, schema });
+    authUrl = env.AUTH_URL;
+    authClientID = env.AUTH_CLIENT_ID;
     ctx.blockConcurrencyWhile(async () => {
       this.clock = (await this.storage.get<number>("clock")) || 0;
       await this.#migrate();
@@ -756,6 +758,7 @@ export class Stream extends DurableObject {
       const streamConfig: any = {
         model: getModel(options.name),
         messages,
+        system: systemPrompt.replaceAll("{{time}}", new Date().toISOString()),
         providerOptions: {
           // TODO: set thinking budget and other options for all providers
           google: {
@@ -896,6 +899,11 @@ export class Stream extends DurableObject {
 
 const app = new Hono<{ Bindings: Env }>();
 app.use(cors());
+app.use(async (ctx, next) => {
+  authUrl = ctx.env.AUTH_URL;
+  authClientID = ctx.env.AUTH_CLIENT_ID;
+  next();
+});
 app.get("/stream/:id", async (c) => {
   const binding = c.env.STREAM;
   const stub = binding.get(binding.idFromName(c.req.param("id")));

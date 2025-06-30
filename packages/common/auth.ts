@@ -8,10 +8,6 @@ const baseUser = object({
   image: string(),
 });
 
-// use any OpenAuth issuer that supports Google auth
-export const authUrl = "https://auth.prodemo.nuxflare.com";
-export const authClientID = "nuxflare-chat";
-
 export const subjects = createSubjects({
   user: baseUser,
 });
