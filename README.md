@@ -55,7 +55,7 @@ Nuxflare Chat is a blazing-fast, open-source AI chat app built with Cloudflare a
 1. **Clone and configure**
 
    ```bash
-   git clone <repo-url>
+   git clone https://github.com/nuxflare/chat
    cd nuxflare-chat
    cp .env.example .env
    ```
