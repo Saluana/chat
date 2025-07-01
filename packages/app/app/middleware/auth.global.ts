@@ -6,11 +6,8 @@ export default defineNuxtRouteMiddleware(async (to) => {
   )
     return;
   const { redirect, sessionState } = useAuth();
-  if (
-    !sessionState.value.time ||
-    new Date().getTime() - sessionState.value.time >
-      useRuntimeConfig().public.sessionInterval
-  ) {
+
+  const fetchSession = async () => {
     try {
       const time = new Date().getTime();
       const user = await $fetch("/api/auth/session", {
@@ -18,6 +15,15 @@ export default defineNuxtRouteMiddleware(async (to) => {
       });
       sessionState.value = { time, user };
     } catch {}
+  };
+
+  if (
+    !sessionState.value.time ||
+    new Date().getTime() - sessionState.value.time >
+      useRuntimeConfig().public.sessionInterval
+  ) {
+    const sessionPromise = fetchSession();
+    if (!sessionState.value.user?.id) await sessionPromise;
   }
   if (import.meta.server || sessionState.value.user?.id) {
     return;
