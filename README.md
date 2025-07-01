@@ -91,6 +91,22 @@ cd packages/app && bun run dev
 cd packages/api && bunx wrangler dev
 ```
 
+**Auth Setup for Development**
+
+By default, development mode uses `auth.chat.nuxflare.com` as the auth endpoint—you can keep using this for quick development.
+
+To use your own auth endpoint:
+
+- Deploy once with the production steps above
+- Update the auth URL in `packages/api/.dev.vars` to point to your deployment
+
+Alternatively, run the auth server locally:
+
+```bash
+# Terminal 3: Auth (optional)
+cd packages/auth && bunx wrangler dev
+```
+
 ## 🏗️ Architecture
 
 **Edge-First Design**
