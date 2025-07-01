@@ -39,6 +39,7 @@ export default defineNuxtConfig({
       apiUrl: "http://localhost:8787",
       authUrl: "https://auth.chat.nuxflare.com",
       authClientID: "nuxflare-chat",
+      sessionInterval: 5 * 60 * 1000,
     },
   },
   css: ["~/assets/css/main.css"],

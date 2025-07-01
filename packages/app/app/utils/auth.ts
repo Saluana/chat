@@ -2,6 +2,8 @@ import { createClient, type Client } from "@openauthjs/openauth/client";
 import { type SubjectUser } from "@nuxflare-chat/common/auth";
 
 type UserSession = {
+  // sync time
+  time?: number;
   user?: SubjectUser;
 };
 
@@ -17,9 +19,10 @@ export const useSession = () => {
     await $fetch("/api/auth/session", { method: "DELETE" });
   };
   const refresh = async () => {
-    const { data } = await useFetch("/api/auth/session");
-    if (data.value) {
-      sessionState.value = { user: data.value };
+    const time = new Date().getTime();
+    const user = await $fetch("/api/auth/session");
+    if (user) {
+      sessionState.value = { time, user };
       return;
     } else {
       sessionState.value = {};

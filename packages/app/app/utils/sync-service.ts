@@ -57,18 +57,19 @@ const THREAD_COLUMNS = [
   "clock",
 ];
 
-async function initService() {
+async function initClock() {
   const { rows } = await dbExec({
     sql: `SELECT clock FROM clock WHERE id = 1`,
     bindings: undefined,
   });
+  console.log("clock", rows);
   if (rows.length > 0) {
     _clock = rows[0][0] as number;
   }
 }
 
 export function syncServiceProvider() {
-  initService().then(() => {
+  initClock().then(() => {
     startMessageQueue();
   });
 
@@ -372,16 +373,15 @@ export function syncServiceProvider() {
       if (endpoint !== _endpoint || token !== _token) {
         _endpoint = endpoint;
         _token = token;
-        pullChanges()
-          .then(() => {
-            restartWebsocketsServer();
-          })
-          .then(() => {
-            isSyncReady = true;
-            console.log("sync ready!");
-            syncReadyResolvers.forEach((resolve) => resolve());
-            syncReadyResolvers = [];
-          });
+        (async () => {
+          await initClock();
+          await pullChanges();
+          await restartWebsocketsServer();
+          isSyncReady = true;
+          console.log("sync ready!");
+          syncReadyResolvers.forEach((resolve) => resolve());
+          syncReadyResolvers = [];
+        })();
       }
     },
     async newThread(params: {

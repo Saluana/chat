@@ -14,11 +14,7 @@
   </div>
 
   <div v-else class="h-full flex flex-col relative">
-    <div
-      class="overflow-y-auto flex-grow"
-      ref="messagesContainer"
-      @scroll="handleScroll"
-    >
+    <div class="overflow-y-auto flex-grow" ref="messagesContainer">
       <UContainer
         class="max-w-4xl h-auto flex flex-col"
         :class="[!currentThreadId ? 'mt-[250px]' : 'mt-0']"
@@ -132,6 +128,7 @@
             </div>
           </div>
         </div>
+        <div ref="containerBottom" />
       </UContainer>
     </div>
 
@@ -357,60 +354,16 @@ const branchThread = async (messageId: string) => {
   await $sync.branchThread(currentThreadId.value, messageId, newThreadId);
 };
 
-const messagesContainer = ref<HTMLElement>();
-const chatPromptContainer = ref<HTMLElement>();
-const isAtBottom = ref(true);
-const chatPromptHeight = ref(0);
+const messagesContainer = useTemplateRef("messagesContainer");
+const messagesContainerBottom = useTemplateRef("containerBottom");
+const chatPromptContainer = useTemplateRef("chatPromptContainer");
+const { height: chatPromptHeight } = useElementBounding(chatPromptContainer);
 
-onMounted(() => {
-  handleScroll();
-  updateChatPromptHeight();
-});
-
-watch(
-  [messagesList, message, attachmentFiles],
-  () => {
-    nextTick(() => {
-      handleScroll();
-      updateChatPromptHeight();
-    });
-  },
-  { deep: true },
-);
-
-const updateChatPromptHeight = () => {
-  nextTick(() => {
-    if (chatPromptContainer.value) {
-      chatPromptHeight.value = chatPromptContainer.value.offsetHeight;
-    }
-  });
-};
-
-let resizeObserver: ResizeObserver;
-onMounted(() => {
-  resizeObserver = new ResizeObserver(() => {
-    updateChatPromptHeight();
-  });
-  if (chatPromptContainer.value) {
-    resizeObserver.observe(chatPromptContainer.value);
-  }
-});
-
-onUnmounted(() => {
-  if (resizeObserver) resizeObserver.disconnect();
-});
-
-const handleScroll = () => {
-  if (messagesContainer.value) {
-    const { scrollTop, scrollHeight, clientHeight } = messagesContainer.value;
-    isAtBottom.value = scrollTop + clientHeight >= scrollHeight - 10; // 10px threshold
-  }
-};
+const isAtBottom = useElementVisibility(messagesContainerBottom);
 
 const scrollToBottom = () => {
   if (messagesContainer.value) {
     messagesContainer.value.scrollTop = messagesContainer.value.scrollHeight;
-    handleScroll();
   }
 };
 </script>
