@@ -117,7 +117,6 @@
             @retryMessage="() => retryMessage(message.id)"
             @branchThread="() => branchThread(message.id)"
           />
-
           <div
             v-if="uploadingAttachment && currentThreadId"
             class="max-w-[80%] ml-auto flex items-center justify-between gap-2 p-3 rounded-lg ring-1 ring-primary-400/30 dark:ring-0 bg-primary-100/50 dark:bg-neutral-500/20"
@@ -127,8 +126,9 @@
               Uploading files & sending...
             </div>
           </div>
+
+          <div ref="containerBottom" />
         </div>
-        <div ref="containerBottom" />
       </UContainer>
     </div>
 
