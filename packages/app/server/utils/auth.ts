@@ -40,7 +40,6 @@ export async function getUserSession(
   refreshToken = "",
 ) {
   const { access, refresh } = getTokens(event);
-  console.log("tokens", access, refresh);
   const client = getClient(event);
   const verified = await client.verify(subjects, access || accessToken, {
     refresh: refresh || refreshToken,
