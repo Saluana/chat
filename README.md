@@ -1,4 +1,4 @@
-# 🚀 Nuxflare Chat
+# Nuxflare Chat
 
 > Nuxflare Chat was originally started as a project for the T3 Chat Cloneathon (https://cloneathon.t3.chat).
 
