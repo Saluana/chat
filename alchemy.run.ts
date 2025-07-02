@@ -9,7 +9,9 @@ import {
 
 // config
 const appName = "nuxflare-chat";
-const context = await alchemy(appName);
+const context = await alchemy(appName, {
+  password: process.env.ALCHEMY_PASSWORD,
+});
 const domain =
   context.stage === "production"
     ? "chat.nuxflare.com"
@@ -47,7 +49,7 @@ const auth = await Worker("auth", {
   bindings: {
     KV: authKV,
     GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID!,
-    GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET!,
+    GOOGLE_CLIENT_SECRET: alchemy.secret(process.env.GOOGLE_CLIENT_SECRET!),
   },
 });
 
