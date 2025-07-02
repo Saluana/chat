@@ -147,4 +147,4 @@ MIT - Go wild, build cool stuff.
 
 ---
 
-_Made with ☕ and spite for closed-source chat apps_
+_Made with ☕_
