@@ -14,6 +14,7 @@ onMounted(async () => {
   const state = route.query.state;
   const verifier = sessionStorage.getItem("openrouter_code_verifier");
   const savedState = sessionStorage.getItem("openrouter_state");
+  const codeMethod = sessionStorage.getItem("openrouter_code_method") || "S256";
   if (!code || !verifier) {
     console.error("Missing code or verifier");
     return router.push("/");
@@ -31,7 +32,7 @@ onMounted(async () => {
       body: JSON.stringify({
         code: String(code),
         code_verifier: verifier,
-        code_challenge_method: "S256",
+        code_challenge_method: codeMethod,
       }),
     });
     const directJson = await directResp.json().catch(() => null);
@@ -56,6 +57,7 @@ onMounted(async () => {
     } catch {}
     sessionStorage.removeItem("openrouter_code_verifier");
     sessionStorage.removeItem("openrouter_state");
+    sessionStorage.removeItem("openrouter_code_method");
     router.push("/");
   } catch (err) {
     console.error("Exchange failed", err);

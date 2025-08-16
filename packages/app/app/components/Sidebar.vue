@@ -200,8 +200,15 @@ const actions = computed(() => {
       name: "Login with OpenRouter",
       action: async () => {
         popperOpen.value = false;
+        // Avoid awaiting navigation to preserve user gesture on iOS Safari
         try {
-          await startLogin();
+          setTimeout(() => {
+            try {
+              startLogin();
+            } catch (e) {
+              console.error(e);
+            }
+          }, 0);
         } catch (e) {
           console.error(e);
         }
