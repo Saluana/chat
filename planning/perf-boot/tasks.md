@@ -13,14 +13,14 @@ artifact_id: 0b2f7c3a-7c10-4c3a-9c9b-7b1a3c3d6c42
 ## 2. Remove render-blocking KaTeX CSS
 
 - [x] Replace nuxt.config.ts head.link stylesheet with: preconnect + preload + on-demand injection script, or media="print" swap technique. Requirements: 3.
-- [ ] Verify math renders post-load in AssistantMessage markdown flow. Requirements: 6.
+- [x] Verify math renders post-load in AssistantMessage markdown flow. Requirements: 6.
 
 ## 3. Defer Markdown pipeline
 
-- [ ] Delete warmup call in `app/app.vue` that calls `processMarkdownChunk("# test")`. Requirements: 2.
-- [ ] Create `utils/markdown-lazy.ts` that dynamically imports unified stack; export `render()` with internal singleton. Requirements: 2.
-- [ ] Update `MarkdownRenderer.vue` and `MarkdownChunkRenderer.client.vue` (if present) to call lazy renderer; show plain text fallback until ready. Requirements: 1,2,6.
-- [ ] Optional: move to a Web Worker if chunk size > threshold (phase 2). Requirements: 2.
+- [x] Delete warmup call in `app/app.vue` that calls `processMarkdownChunk("# test")`. Requirements: 2.
+- [x] Create `utils/markdown-lazy.ts` that dynamically imports unified stack; export `render()` with internal singleton. Requirements: 2.
+- [x] Update `MarkdownRenderer.vue` and `MarkdownChunkRenderer.client.vue` (if present) to call lazy renderer; show plain text fallback until ready. Requirements: 1,2,6.
+- [x] Optional: move to a Web Worker if chunk size > threshold (phase 2). Requirements: 2.
 
 ## 4. Progressive hydration of Sidebar/ThreadList
 

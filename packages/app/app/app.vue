@@ -5,8 +5,5 @@
 </template>
 
 <script setup lang="ts">
-onMounted(() => {
-  // warm up markdown processor
-  processMarkdownChunk("# test");
-});
+// No warmup; markdown stack loads on demand via utils/markdown-lazy
 </script>

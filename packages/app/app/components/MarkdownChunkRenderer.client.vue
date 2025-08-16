@@ -1,18 +1,38 @@
 <template>
-  <div v-html="html" />
+  <div>
+    <div v-if="!ready" class="py-2">
+      <MarkdownSkeleton :variant="variant" />
+    </div>
+    <div v-else v-html="html" />
+  </div>
 </template>
 
 <script setup lang="ts">
-const { block } = defineProps<{ block: string }>();
-const html = ref(block);
+const { block, variant } = withDefaults(
+  defineProps<{ block: string; variant?: "user" | "assistant" }>(),
+  { variant: "assistant" },
+);
+const emit = defineEmits(["ready"]);
+const html = ref("");
+const ready = ref(false);
+// Lazy renderer
+const { renderMarkdownChunk } = await import("~/utils/markdown-lazy");
 
 watch(
   [() => block],
   async () => {
     if (block) {
-      html.value = await processMarkdownChunk(block);
+      ready.value = false;
+      html.value = await renderMarkdownChunk(block);
+      ready.value = true;
+      emit("ready");
     }
   },
   { immediate: true },
 );
+</script>
+<script lang="ts">
+export default {
+  components: { MarkdownSkeleton: () => import("./MarkdownSkeleton.vue") },
+};
 </script>

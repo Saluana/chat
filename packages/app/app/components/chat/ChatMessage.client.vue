@@ -44,7 +44,12 @@
           class="max-w-[80%] flex p-3 rounded-lg ring-1 ring-primary-400/30 dark:ring-0 bg-primary-100/50 dark:bg-neutral-500/20"
         >
           <div class="flex flex-col text-md">
-            <MarkdownRenderer :content="message.content" />
+            <MarkdownRenderer
+              v-if="message.content && message.content.trim().length"
+              :content="message.content"
+              variant="user"
+            />
+            <MarkdownSkeleton v-else variant="user" />
           </div>
         </div>
 
@@ -298,5 +303,11 @@ const confirmDelete = async () => {
     showToast("Failed to delete message", "error");
   }
   openDeleteModal.value = false;
+};
+</script>
+
+<script lang="ts">
+export default {
+  components: { MarkdownSkeleton: () => import("../MarkdownSkeleton.vue") },
 };
 </script>
