@@ -122,8 +122,26 @@
             />
           </template>
           <template v-else-if="currentThreadId">
-            <div class="text-center text-neutral-400 py-10">
-              No messages yet.
+            <div v-if="isLoadingMessages" class="space-y-4">
+              <div v-for="i in 4" :key="i" class="flex gap-3 items-start">
+                <div
+                  class="w-8 h-8 rounded-full bg-neutral-200 dark:bg-neutral-700 animate-pulse"
+                />
+                <div class="flex-1 space-y-2">
+                  <div
+                    class="h-3 w-2/3 rounded bg-neutral-200 dark:bg-neutral-700 animate-pulse"
+                  />
+                  <div
+                    class="h-3 w-1/2 rounded bg-neutral-200 dark:bg-neutral-700 animate-pulse"
+                  />
+                  <div
+                    class="h-3 w-3/4 rounded bg-neutral-200 dark:bg-neutral-700 animate-pulse"
+                  />
+                </div>
+              </div>
+            </div>
+            <div v-else class="text-center text-neutral-400 py-10">
+              <!-- intentionally blank when no messages and not loading -->
             </div>
           </template>
           <div
@@ -176,7 +194,8 @@ definePageMeta({
 });
 const route = useRoute();
 const threadsStore = useThreadsStore();
-const { messagesList, activeThreadObject } = storeToRefs(threadsStore);
+const { messagesList, activeThreadObject, isLoadingMessages } =
+  storeToRefs(threadsStore);
 const promptStore = usePromptStore();
 const { uploadingAttachment } = storeToRefs(promptStore);
 const { $sync } = useNuxtApp();

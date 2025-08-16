@@ -25,6 +25,7 @@ export const useThreadsStore = defineStore("threads", () => {
   const threads = ref<Record<string, Thread>>({});
   const activeThread = ref<string | null>(null);
   const messages = ref<Record<string, any>>({});
+  const isLoadingMessages = ref(false);
   const responseStreaming = ref(false);
   const stopStreaming = ref(false);
 
@@ -156,6 +157,7 @@ export const useThreadsStore = defineStore("threads", () => {
         const { $sync } = useNuxtApp();
         (async () => {
           try {
+            isLoadingMessages.value = true;
             console.log(
               "[ThreadsDebug] fetching messages for thread",
               threadId,
@@ -266,6 +268,8 @@ export const useThreadsStore = defineStore("threads", () => {
             } catch {}
           } catch (e) {
             console.error("Failed to load messages for thread", threadId, e);
+          } finally {
+            isLoadingMessages.value = false;
           }
         })();
       }
@@ -354,6 +358,7 @@ export const useThreadsStore = defineStore("threads", () => {
     responseStreaming,
     stopStreaming,
     messages,
+    isLoadingMessages,
     messagesList,
     activeThread,
     activeThreadObject,
