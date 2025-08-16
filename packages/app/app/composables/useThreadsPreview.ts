@@ -14,6 +14,7 @@ const ready = ref(false);
 const isStale = ref(false);
 let initialized = false;
 let refreshing: Promise<void> | null = null;
+let pendingInvalidate = false; // set when invalidations occur before init
 
 const versionKey = versionKeyFor(PREVIEW_CACHE_VERSION);
 
@@ -69,6 +70,11 @@ async function readCacheOnce() {
 }
 
 async function doRefresh(force = false) {
+  if (!initialized) {
+    // Defer heavy work until explicitly initialized by the visible list
+    if (force) pendingInvalidate = true;
+    return;
+  }
   if (refreshing && !force) return refreshing;
   refreshing = (async () => {
     const t0 = import.meta.dev ? performance.now() : 0;
@@ -166,24 +172,32 @@ async function doRefresh(force = false) {
 
 async function invalidateAll() {
   await PreviewCache.clearAll();
+  // If not initialized yet, mark for refresh later
+  if (!initialized) {
+    pendingInvalidate = true;
+    return;
+  }
   return doRefresh(true);
 }
 
 export function useThreadsPreview() {
-  if (!initialized) {
-    initialized = true;
-    // First touch: load cache immediately and kick refresh
-    // Fire and forget; callers can await ready/isStale as needed
-    readCacheOnce();
-    doRefresh(false);
-  }
-
   return {
     items,
     isStale,
     ready,
     refresh: (opts?: { force?: boolean }) => doRefresh(!!opts?.force),
     invalidateAll,
+    init: async () => {
+      if (initialized) return;
+      initialized = true;
+      await readCacheOnce();
+      if (pendingInvalidate) {
+        pendingInvalidate = false;
+        await doRefresh(true);
+      } else {
+        await doRefresh(false);
+      }
+    },
     // Best-effort patch: updates an item locally without forcing a full refresh
     upsertPreview: (partial: Partial<ThreadPreview> & { id: string }) => {
       const idx = items.value.findIndex((t) => t.id === partial.id);

@@ -97,7 +97,10 @@
               ]"
             />
             <template #content>
-              <LazyThreadMenu :moreActions="moreActions" :thread="thread" />
+              <LazyFragmentsThreadMenu
+                :moreActions="moreActions"
+                :thread="thread"
+              />
             </template>
           </UPopover>
         </div>
