@@ -118,16 +118,24 @@ export const useThreadsStore = defineStore("threads", () => {
     return groups;
   });
 
-  let messagesChannel: BroadcastChannel;
+  let messagesChannel: BroadcastChannel | null = null;
   function setActiveThread(threadId: string | null) {
     if (import.meta.client) {
       activeThread.value = threadId;
       messages.value = {};
       if (threadId) {
         const { $sync } = useNuxtApp();
-        $sync.getMessagesForThread?.(threadId).then((msgs: any[]) => {
-          msgs.forEach((msg) => (messages.value[msg.id] = msg));
-        });
+        (async () => {
+          try {
+            const msgs = ((await $sync.getMessagesForThread?.(threadId)) ??
+              []) as any[];
+            if (Array.isArray(msgs)) {
+              msgs.forEach((msg) => (messages.value[msg.id] = msg));
+            }
+          } catch (e) {
+            console.error("Failed to load messages for thread", threadId, e);
+          }
+        })();
       }
       if (messagesChannel) {
         messagesChannel.close();
@@ -167,10 +175,11 @@ export const useThreadsStore = defineStore("threads", () => {
 
     const fetchInitialThreads = async () => {
       try {
-        const initialThreadsArray = await $sync.getThreads!();
-        if (initialThreadsArray) {
-          addThreads(initialThreadsArray);
-        }
+        const initialThreadsArray = (await $sync.getThreads!()) as unknown;
+        const arr = Array.isArray(initialThreadsArray)
+          ? (initialThreadsArray as Thread[])
+          : [];
+        if (arr.length) addThreads(arr);
       } catch (error) {
         console.error("Failed to fetch initial threads:", error);
       }

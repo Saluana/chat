@@ -259,7 +259,8 @@ const selectPrompt = (prompt: any) => {
 watch(
   () => route.params.id,
   async (newId) => {
-    const newThreadId = newId as string | null;
+    const newThreadId =
+      typeof newId === "string" && newId.length > 0 ? newId : null;
     threadsStore.setActiveThread(newThreadId);
   },
   { immediate: true },
@@ -311,12 +312,14 @@ const sendMessage = async (text: string) => {
   }
   if (!currentThreadId) {
     try {
-      const { threadId: newThreadId } = await $sync.newThread({
+      const newThreadResp = (await $sync.newThread({
         content: text,
         attachments,
         options,
-      });
-      navigateTo(`/${newThreadId}`);
+      })) as any;
+      const newThreadId = (newThreadResp &&
+        (newThreadResp.threadId || newThreadResp.id)) as string;
+      if (newThreadId) navigateTo(`/${newThreadId}`);
     } catch (error) {
       console.error("Failed to create new thread:", error);
     }

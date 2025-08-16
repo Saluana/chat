@@ -20,14 +20,22 @@ async function log(text) {
 }
 
 // Forward messages (and ports) from client to client.
+const handledNonces = new Set();
 globalThis.addEventListener("message", async (event) => {
   if (event.data?.get_client_id) {
     event.source.postMessage({
       client_id: event.source.id,
     });
   } else if (event.data?.sharedService) {
-    const client = await globalThis.clients.get(event.data.clientId);
-    client.postMessage(event.data, event.ports);
+    try {
+      const nonce = event.data?.nonce;
+      if (nonce && handledNonces.has(nonce)) return;
+      if (nonce) handledNonces.add(nonce);
+      const client = await globalThis.clients.get(event.data.clientId);
+      client?.postMessage(event.data, event.ports);
+    } catch (e) {
+      // Ignore DataCloneError from reusing a neutered port
+    }
   }
 });
 

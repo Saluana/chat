@@ -74,6 +74,7 @@ export class SharedService extends EventTarget {
         // instance is necessary because we may be serving our own
         // request.
         const providerId = await this.#clientId;
+        const handledNonces = new Set();
         const broadcastChannel = new BroadcastChannel("SharedService");
         broadcastChannel.addEventListener(
           "message",
@@ -82,6 +83,9 @@ export class SharedService extends EventTarget {
               data?.type === "request" &&
               data?.sharedService === this.#serviceName
             ) {
+              // Deduplicate by nonce to avoid re-sending the same port
+              if (data?.nonce && handledNonces.has(data.nonce)) return;
+              if (data?.nonce) handledNonces.add(data.nonce);
               // Get a port to send to the client.
               const requestedPort = await new Promise((resolve) => {
                 port.addEventListener(
@@ -93,8 +97,17 @@ export class SharedService extends EventTarget {
                 );
                 port.postMessage(data.clientId);
               });
-
-              this.#sendPortToClient(data, requestedPort);
+              try {
+                await this.#sendPortToClient(data, requestedPort);
+              } catch (e) {
+                try {
+                  requestedPort?.close?.();
+                } catch {}
+                console.warn(
+                  "SharedService: failed to transfer port, likely already transferred",
+                  e,
+                );
+              }
             }
           },
           { signal: this.#onDeactivate.signal },
@@ -135,6 +148,7 @@ export class SharedService extends EventTarget {
     // Return the port to the client via the service worker.
     if (!("serviceWorker" in navigator)) return;
     const serviceWorker = await navigator.serviceWorker.ready;
+    // postMessage will neuter 'port'. Ensure it's only used once.
     serviceWorker.active?.postMessage(message, [port]);
   }
 
