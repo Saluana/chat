@@ -1,6 +1,6 @@
 export default defineNuxtPlugin({
   name: "sync",
-  async setup() {
+  setup() {
     const isClient = typeof window !== "undefined";
     const hasServiceWorker =
       isClient && "serviceWorker" in navigator && window.isSecureContext;
@@ -20,22 +20,31 @@ export default defineNuxtPlugin({
       return {
         provide: {
           sync: {
-            async setAuthInfo() {
+            async setAuthInfo(_endpoint: string, _token: string) {
               /* no-op */
             },
-            async newThread() {
+            async newThread(_params: {
+              content: string;
+              attachments?: any[];
+              options: { name: string; thinkingBudget: string };
+            }) {
               throw new Error("Sync not available in this environment");
             },
             async getThreads() {
               return [];
             },
-            async getMessagesForThread() {
+            async getMessagesForThread(_threadId: string) {
               return [];
             },
-            async updateThread() {
+            async updateThread(_id: string, _update: any) {
               /* no-op */
             },
-            async sendMessage() {
+            async sendMessage(_params: {
+              threadId: string;
+              content: string;
+              attachments?: any[];
+              options: { name: string; thinkingBudget: string };
+            }) {
               throw new Error("Sync not available in this environment");
             },
             async getKV(name: string) {
@@ -44,16 +53,26 @@ export default defineNuxtPlugin({
             async setKV(name: string, value: string) {
               return fallbackKVSet(name, value);
             },
-            async retryMessage() {
+            async retryMessage(
+              _messageId: string,
+              _options?: { model?: string; thinkingBudget?: string },
+            ) {
               /* no-op */
             },
-            async branchThread() {
+            async branchThread(
+              _threadId: string,
+              _messageId: string,
+              _newThreadId: string,
+            ) {
               /* no-op */
             },
-            async updateMessage() {
+            async updateMessage(
+              _id: string,
+              _update: { data?: any; deleted?: boolean },
+            ) {
               /* no-op */
             },
-            async searchThreads() {
+            async searchThreads(_query: string) {
               return [];
             },
             async clear() {
@@ -65,56 +84,131 @@ export default defineNuxtPlugin({
       };
     }
 
-    await navigator.serviceWorker
-      .register("SharedService_ServiceWorker.js")
-      .then(() => navigator.serviceWorker.ready);
-    const sharedService = new SharedService(
-      "sync-service",
-      syncServiceProvider,
-    );
-    sharedService.activate();
+    // Non-blocking initialization state and call queue
+    type Level = "provider" | "sync";
+    type QueuedCall = {
+      level: Level;
+      method: string;
+      args: any[];
+      resolve: (v: any) => void;
+      reject: (e: any) => void;
+    };
 
-    let _ready = false;
-    let _syncReady = false;
-    const readyResolvers: Function[] = [];
-    const syncReadyResolvers: Function[] = [];
-    (async () => {
-      while (!_ready) {
-        await new Promise((res) => setTimeout(res, 30));
-        try {
-          _ready = await Promise.race([
-            new Promise((res) => setTimeout(res, 100)),
-            sharedService.proxy["isReady"]!(),
-          ]);
-        } catch (err) {
-          console.log("err", err);
-          // retry
-        }
-      }
-      console.log("_ready");
-      readyResolvers.forEach((res) => res());
-      while (!_syncReady) {
-        await new Promise((res) => setTimeout(res, 30));
-        try {
-          _syncReady = await sharedService.proxy["isSyncReady"]!();
-        } catch {
-          // retry
-        }
-      }
-      console.log("_syncReady");
-      syncReadyResolvers.forEach((res) => res());
-    })();
+    const queue: QueuedCall[] = [];
+    let sharedService: any | null = null;
+    let providerReady = false;
+    let syncReady = false;
 
-    async function isReady() {
-      if (_ready) return true;
-      return new Promise((res) => {
-        readyResolvers.push(res);
-      });
+    let resolveProviderReady: (() => void) | null = null;
+    const providerReadyPromise = new Promise<void>((res) => {
+      resolveProviderReady = res;
+    });
+    let resolveSyncReady: (() => void) | null = null;
+    const syncReadyPromise = new Promise<void>((res) => {
+      resolveSyncReady = res;
+    });
+
+    function flushQueue() {
+      if (!sharedService) return;
+      const readyNow: QueuedCall[] = [];
+      const rest: QueuedCall[] = [];
+      for (const item of queue) {
+        const ok =
+          (item.level === "provider" && providerReady) ||
+          (item.level === "sync" && syncReady);
+        (ok ? readyNow : rest).push(item);
+      }
+      queue.length = 0;
+      queue.push(...rest);
+      for (const item of readyNow) {
+        Promise.resolve(sharedService.proxy[item.method]!(...item.args))
+          .then(item.resolve)
+          .catch(item.reject);
+      }
     }
-    async function isSyncReady() {
-      if (_syncReady) return true;
-      return new Promise((res) => {
-        syncReadyResolvers.push(res);
+
+    function startReadinessWatchers() {
+      if (!sharedService) return;
+      // Provider readiness: poll lightly with backoff without blocking setup
+      const checkProvider = (delay = 50) => {
+        Promise.resolve(sharedService.proxy["isReady"]!())
+          .then((val: any) => {
+            if (val && !providerReady) {
+              providerReady = true;
+              resolveProviderReady?.();
+              flushQueue();
+            } else if (!providerReady) {
+              setTimeout(
+                () => checkProvider(Math.min(delay * 1.5, 1000)),
+                delay,
+              );
+            }
+          })
+          .catch(() =>
+            setTimeout(() => checkProvider(Math.min(delay * 1.5, 1000)), delay),
+          );
+      };
+      checkProvider();
+
+      // Sync readiness follows provider readiness
+      const checkSync = (delay = 100) => {
+        if (!providerReady) {
+          setTimeout(() => checkSync(delay), delay);
+          return;
+        }
+        Promise.resolve(sharedService.proxy["isSyncReady"]!())
+          .then((val: any) => {
+            if (val && !syncReady) {
+              syncReady = true;
+              resolveSyncReady?.();
+              flushQueue();
+            } else if (!syncReady) {
+              setTimeout(() => checkSync(Math.min(delay * 1.5, 1500)), delay);
+            }
+          })
+          .catch(() =>
+            setTimeout(() => checkSync(Math.min(delay * 1.5, 1500)), delay),
+          );
+      };
+      checkSync();
+    }
+
+    function ensureInit() {
+      if (sharedService) return;
+
+      const init = () => {
+        // Kick off SW registration without awaiting
+        navigator.serviceWorker
+          .register("SharedService_ServiceWorker.js")
+          .catch((e) => console.warn("SW registration failed", e));
+
+        sharedService = new SharedService("sync-service", syncServiceProvider);
+        sharedService.activate();
+        startReadinessWatchers();
+      };
+
+      // Prefer idle time to avoid stealing cycles during hydration
+      if ("requestIdleCallback" in window) {
+        (window as any).requestIdleCallback(init, { timeout: 200 });
+      } else {
+        queueMicrotask(init);
+      }
+    }
+
+    function enqueue(level: Level, method: string, args: any[]) {
+      ensureInit();
+      return new Promise((resolve, reject) => {
+        if (
+          sharedService &&
+          ((level === "provider" && providerReady) ||
+            (level === "sync" && syncReady))
+        ) {
+          Promise.resolve(sharedService.proxy[method]!(...args))
+            .then(resolve)
+            .catch(reject);
+        } else {
+          queue.push({ level, method, args, resolve, reject });
+        }
       });
     }
 
@@ -122,28 +216,23 @@ export default defineNuxtPlugin({
       provide: {
         sync: {
           async setAuthInfo(endpoint: string, token: string) {
-            await isReady();
-            return await sharedService.proxy["setAuthInfo"]!(endpoint, token);
+            return enqueue("provider", "setAuthInfo", [endpoint, token]);
           },
           async newThread(params: {
             content: string;
             attachments?: any[];
             options: { name: string; thinkingBudget: string };
           }) {
-            await isSyncReady();
-            return await sharedService.proxy["newThread"]!(params);
+            return enqueue("sync", "newThread", [params]);
           },
           async getThreads() {
-            await isReady();
-            return await sharedService.proxy["getThreads"]!();
+            return enqueue("provider", "getThreads", []);
           },
           async getMessagesForThread(threadId: string) {
-            await isReady();
-            return await sharedService.proxy["getMessagesForThread"]!(threadId);
+            return enqueue("provider", "getMessagesForThread", [threadId]);
           },
           async updateThread(id: string, update: any) {
-            await isSyncReady();
-            return await sharedService.proxy["updateThread"]!(id, update);
+            return enqueue("sync", "updateThread", [id, update]);
           },
           async sendMessage(params: {
             threadId: string;
@@ -151,53 +240,42 @@ export default defineNuxtPlugin({
             attachments?: any[];
             options: { name: string; thinkingBudget: string };
           }) {
-            await isSyncReady();
-            return await sharedService.proxy["sendMessage"]!(params);
+            return enqueue("sync", "sendMessage", [params]);
           },
           async getKV(name: string) {
-            await isSyncReady();
-            return await sharedService.proxy["getKV"]!(name);
+            return enqueue("sync", "getKV", [name]);
           },
           async setKV(name: string, value: string) {
-            await isSyncReady();
-            return await sharedService.proxy["setKV"]!(name, value);
+            return enqueue("sync", "setKV", [name, value]);
           },
           async retryMessage(
             messageId: string,
             options?: { model?: string; thinkingBudget?: string },
           ) {
-            await isSyncReady();
-            return await sharedService.proxy["retryMessage"]!(
-              messageId,
-              options,
-            );
+            return enqueue("sync", "retryMessage", [messageId, options]);
           },
           async branchThread(
             threadId: string,
             messageId: string,
             newThreadId: string,
           ) {
-            await isSyncReady();
-            return await sharedService.proxy["branchThread"]!(
+            return enqueue("sync", "branchThread", [
               threadId,
               messageId,
               newThreadId,
-            );
+            ]);
           },
           async updateMessage(
             id: string,
             update: { data?: any; deleted?: boolean },
           ) {
-            await isSyncReady();
-            return await sharedService.proxy["updateMessage"]!(id, update);
+            return enqueue("sync", "updateMessage", [id, update]);
           },
           async searchThreads(query: string) {
-            await isReady();
-            return await sharedService.proxy["searchThreads"]!(query);
+            return enqueue("provider", "searchThreads", [query]);
           },
           async clear() {
-            await isReady();
-            return await sharedService.proxy["clear"]!();
+            return enqueue("provider", "clear", []);
           },
         },
       },
