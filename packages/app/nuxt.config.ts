@@ -24,12 +24,21 @@ export default defineNuxtConfig({
   app: {
     head: {
       link: [
+        // Preconnect to speed up CSS fetch
         {
-          rel: "stylesheet",
+          rel: "preconnect",
+          href: "https://cdn.jsdelivr.net",
+          crossorigin: "anonymous",
+        },
+        // Preload + swap to avoid render-blocking
+        {
+          rel: "preload",
+          as: "style",
           href: "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css",
           integrity:
             "sha384-5TcZemv2l/9On385z///+d7MSYlvIEw9FuZTIdZ14vJLqWphw7e7ZPuOiCHJcFCP",
           crossorigin: "anonymous",
+          onload: "this.onload=null;this.rel='stylesheet'",
         },
       ],
     },

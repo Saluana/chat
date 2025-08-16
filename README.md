@@ -148,3 +148,31 @@ MIT - Go wild, build cool stuff.
 ---
 
 _Made with ☕_
+
+## Performance marks (boot instrumentation)
+
+We instrument client boot to track time-to-interactive milestones:
+
+- app_start: when the client plugin initializes
+- shell_painted: shortly after first paint/next frame
+- first_click_ready: first user interaction after the shell is ready
+- heavy_deps_loaded: when markdown/db heavy modules finish loading (you can mark this from code)
+
+How to use:
+
+- Open DevTools → Console. On dev builds the app logs a compact table of marks and warns if budgets are exceeded.
+- From code, trigger the heavy mark after your heavy modules are initialized:
+
+```ts
+// anywhere in the Nuxt app after heavy subsystems are ready
+const { $perf } = useNuxtApp();
+$perf?.markHeavyDepsLoaded();
+
+// or dispatch a DOM event (alternative)
+window.dispatchEvent(new Event("perf:heavy_deps_loaded"));
+```
+
+Budgets (dev):
+
+- shell_painted ≤ 1500ms from app_start
+- heavy_deps_loaded ≤ 3000ms from app_start

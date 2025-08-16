@@ -6,13 +6,13 @@ artifact_id: 0b2f7c3a-7c10-4c3a-9c9b-7b1a3c3d6c42
 
 ## 1. Instrument boot and define budgets
 
-- [ ] Add client plugin `plugins/perf.client.ts` with performance marks: app_start (immediate), shell_painted (after mount/nextTick), first_click_ready (set after first interaction hook), heavy_deps_loaded (after markdown/db workers ready). Requirements: 5.
-- [ ] Add a simple console reporter in dev only. Requirements: 5.
-- [ ] Create docs snippet in README for interpreting marks. Requirements: 5.
+- [x] Add client plugin `plugins/perf.client.ts` with performance marks: app_start (immediate), shell_painted (after mount/nextTick), first_click_ready (set after first interaction hook), heavy_deps_loaded (after markdown/db workers ready). Requirements: 5.
+- [x] Add a simple console reporter in dev only. Requirements: 5.
+- [x] Create docs snippet in README for interpreting marks. Requirements: 5.
 
 ## 2. Remove render-blocking KaTeX CSS
 
-- [ ] Replace nuxt.config.ts head.link stylesheet with: preconnect + preload + on-demand injection script, or media="print" swap technique. Requirements: 3.
+- [x] Replace nuxt.config.ts head.link stylesheet with: preconnect + preload + on-demand injection script, or media="print" swap technique. Requirements: 3.
 - [ ] Verify math renders post-load in AssistantMessage markdown flow. Requirements: 6.
 
 ## 3. Defer Markdown pipeline
