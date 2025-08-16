@@ -77,6 +77,9 @@ export default defineNuxtPlugin((nuxtApp) => {
     const BUDGETS = {
       shellPaintedMs: 1500,
       heavyReadyMs: 3000,
+      previewCacheReadMs: 15,
+      previewRefreshMs: 120,
+      dbWorkerReadyMs: 800,
     };
 
     const getMark = (name: string) =>
@@ -93,6 +96,9 @@ export default defineNuxtPlugin((nuxtApp) => {
       const shell = getMark("shell_painted");
       const firstReady = getMark("first_click_ready");
       const heavy = getMark("heavy_deps_loaded");
+      const cacheRead = getMark("preview_cache_read");
+      const dbReady = getMark("db_worker_ready");
+      const refreshDone = getMark("preview_refresh_done");
 
       const fromOrigin = (m?: PerformanceMark) =>
         m ? Math.round(m.startTime) : undefined;
@@ -100,6 +106,9 @@ export default defineNuxtPlugin((nuxtApp) => {
       const dShell = measureDelta("app_start", "shell_painted");
       const dFirst = measureDelta("app_start", "first_click_ready");
       const dHeavy = measureDelta("app_start", "heavy_deps_loaded");
+      const dCache = measureDelta("app_start", "preview_cache_read");
+      const dDbReady = measureDelta("app_start", "db_worker_ready");
+      const dRefresh = measureDelta("app_start", "preview_refresh_done");
 
       // eslint-disable-next-line no-console
       console.groupCollapsed("%cPerf marks", "color:#06f");
@@ -121,6 +130,21 @@ export default defineNuxtPlugin((nuxtApp) => {
           t_ms: fromOrigin(heavy),
           delta_from_start_ms: dHeavy,
         },
+        {
+          mark: "preview_cache_read",
+          t_ms: fromOrigin(cacheRead),
+          delta_from_start_ms: dCache,
+        },
+        {
+          mark: "db_worker_ready",
+          t_ms: fromOrigin(dbReady),
+          delta_from_start_ms: dDbReady,
+        },
+        {
+          mark: "preview_refresh_done",
+          t_ms: fromOrigin(refreshDone),
+          delta_from_start_ms: dRefresh,
+        },
       ]);
       // eslint-disable-next-line no-console
       console.groupEnd();
@@ -133,6 +157,21 @@ export default defineNuxtPlugin((nuxtApp) => {
       if (typeof dHeavy === "number" && dHeavy > BUDGETS.heavyReadyMs) {
         console.warn(
           `[perf] heavy_deps_loaded over budget: ${dHeavy}ms > ${BUDGETS.heavyReadyMs}ms`,
+        );
+      }
+      if (typeof dCache === "number" && dCache > BUDGETS.previewCacheReadMs) {
+        console.warn(
+          `[perf] preview_cache_read over budget: ${dCache}ms > ${BUDGETS.previewCacheReadMs}ms`,
+        );
+      }
+      if (typeof dDbReady === "number" && dDbReady > BUDGETS.dbWorkerReadyMs) {
+        console.warn(
+          `[perf] db_worker_ready over budget: ${dDbReady}ms > ${BUDGETS.dbWorkerReadyMs}ms`,
+        );
+      }
+      if (typeof dRefresh === "number" && dRefresh > BUDGETS.previewRefreshMs) {
+        console.warn(
+          `[perf] preview_refresh_done over budget: ${dRefresh}ms > ${BUDGETS.previewRefreshMs}ms`,
         );
       }
     };

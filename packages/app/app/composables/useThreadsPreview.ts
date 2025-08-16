@@ -1,4 +1,5 @@
 import { ref, shallowRef } from "vue";
+import { useNuxtApp } from "#app";
 import {
   PreviewCache,
   PREVIEW_CACHE_VERSION,
@@ -17,6 +18,17 @@ let refreshing: Promise<void> | null = null;
 const versionKey = versionKeyFor(PREVIEW_CACHE_VERSION);
 
 function mark(name: string) {
+  try {
+    // Prefer perf plugin if available (centralized reporting/budgets)
+    const nuxt = useNuxtApp();
+    const perf = nuxt.$perf as { mark?: (n: string) => void } | undefined;
+    if (perf && typeof perf.mark === "function") {
+      perf.mark(name);
+      return;
+    }
+  } catch {
+    // fall through to performance API
+  }
   try {
     if (typeof performance !== "undefined" && performance.mark) {
       performance.mark(name);
@@ -64,6 +76,8 @@ async function doRefresh(force = false) {
     try {
       // Ensure DB warms up off critical path (nuxt-workers global)
       await initDatabase();
+      // Mirror a readiness mark on the client timeline for centralized reporting
+      mark("db_worker_ready");
       // Query directly via dbExec to avoid export mismatch issues
       const sql = `
         SELECT
