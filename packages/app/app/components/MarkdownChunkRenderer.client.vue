@@ -8,10 +8,10 @@
 </template>
 
 <script setup lang="ts">
-const { block, variant } = withDefaults(
-  defineProps<{ block: string; variant?: "user" | "assistant" }>(),
-  { variant: "assistant" },
-);
+const { block, variant = "assistant" } = defineProps<{
+  block: string;
+  variant?: "user" | "assistant";
+}>();
 const emit = defineEmits(["ready"]);
 const html = ref("");
 const ready = ref(false);

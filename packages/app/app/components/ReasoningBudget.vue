@@ -2,7 +2,6 @@
   <USelectMenu
     v-model="selectedBudget"
     :icon="selectedBudget?.icon"
-    :trailing-icon="false"
     :searchInput="false"
     color="neutral"
     variant="subtle"

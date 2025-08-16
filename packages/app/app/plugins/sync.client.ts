@@ -187,25 +187,40 @@ export default defineNuxtPlugin({
         startReadinessWatchers();
       };
 
-      // Prefer idle time to avoid stealing cycles during hydration
-      if ("requestIdleCallback" in window) {
-        (window as any).requestIdleCallback(init, { timeout: 200 });
-      } else {
-        queueMicrotask(init);
-      }
+      // Kick off immediately in a microtask to avoid delaying first $sync calls
+      queueMicrotask(init);
     }
+
+    const READ_THROUGH_METHODS = new Set([
+      "getThreads",
+      "getMessagesForThread",
+      "searchThreads",
+    ]);
 
     function enqueue(level: Level, method: string, args: any[]) {
       ensureInit();
       return new Promise((resolve, reject) => {
-        if (
+        const canCallNow =
           sharedService &&
           ((level === "provider" && providerReady) ||
-            (level === "sync" && syncReady))
-        ) {
-          Promise.resolve(sharedService.proxy[method]!(...args))
+            (level === "sync" && syncReady));
+
+        // For read-only provider calls, attempt a direct call even if providerReady flag
+        // hasn’t flipped yet. The proxy will wait for the provider port when it’s ready.
+        const tryDirect =
+          sharedService &&
+          level === "provider" &&
+          READ_THROUGH_METHODS.has(method);
+
+        if (canCallNow || tryDirect) {
+          Promise.resolve(sharedService!.proxy[method]!(...args))
             .then(resolve)
-            .catch(reject);
+            .catch((err) => {
+              // If it still fails (e.g., provider port not ready), fall back to queueing.
+              queue.push({ level, method, args, resolve, reject });
+              // Re-try flush soon to recover quickly
+              setTimeout(flushQueue, 50);
+            });
         } else {
           queue.push({ level, method, args, resolve, reject });
         }

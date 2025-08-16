@@ -34,7 +34,7 @@ globalThis.addEventListener("message", async (event) => {
       const client = await globalThis.clients.get(event.data.clientId);
       client?.postMessage(event.data, event.ports);
     } catch (e) {
-      // Ignore DataCloneError from reusing a neutered port
+      // Ignore errors on duplicate/late posts
     }
   }
 });

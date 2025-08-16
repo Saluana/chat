@@ -38,7 +38,8 @@ export class SharedService extends EventTarget {
     this.#providerPort = this.#providerChange();
     this.#clientChannel.addEventListener(
       "message",
-      ({ data }) => {
+      (event) => {
+        const data = event.data;
         if (
           data?.type === "provider" &&
           data?.sharedService === this.#serviceName
@@ -47,6 +48,20 @@ export class SharedService extends EventTarget {
           // Discard any old provider and connect to the new one.
           this.#closeProviderPort(this.#providerPort);
           this.#providerPort = this.#providerChange();
+          return;
+        }
+        if (
+          data?.type === "response" &&
+          data?.sharedService === this.#serviceName &&
+          data?.nonce
+        ) {
+          // Forward the response (and attached ports) to our internal event target
+          this.dispatchEvent(
+            new MessageEvent("message", {
+              data: { ...data },
+              ports: event.ports,
+            }),
+          );
         }
       },
       { signal: this.#onClose.signal },
@@ -84,29 +99,55 @@ export class SharedService extends EventTarget {
               data?.sharedService === this.#serviceName
             ) {
               // Deduplicate by nonce to avoid re-sending the same port
-              if (data?.nonce && handledNonces.has(data.nonce)) return;
-              if (data?.nonce) handledNonces.add(data.nonce);
-              // Get a port to send to the client.
-              const requestedPort = await new Promise((resolve) => {
-                port.addEventListener(
-                  "message",
-                  (event) => {
-                    resolve(event.ports[0]);
-                  },
-                  { once: true },
-                );
-                port.postMessage(data.clientId);
-              });
+              const nonce = data?.nonce;
+              if (nonce && handledNonces.has(nonce)) return;
+              if (nonce) handledNonces.add(nonce);
+
+              // Function to request a fresh client port from provider
+              const requestPort = async () =>
+                await new Promise((resolve) => {
+                  port.addEventListener(
+                    "message",
+                    (event) => resolve(event.ports[0]),
+                    { once: true },
+                  );
+                  port.postMessage(data.clientId);
+                });
+              // First try BroadcastChannel direct response with transferable port
               try {
-                await this.#sendPortToClient(data, requestedPort);
-              } catch (e) {
-                try {
-                  requestedPort?.close?.();
-                } catch {}
-                console.warn(
-                  "SharedService: failed to transfer port, likely already transferred",
-                  e,
+                const requestedPort = await requestPort();
+                broadcastChannel.postMessage(
+                  {
+                    type: "response",
+                    sharedService: this.#serviceName,
+                    nonce,
+                  },
+                  [requestedPort],
                 );
+                return; // success
+              } catch (e) {
+                // Fallback: use Service Worker path with a fresh port
+              }
+
+              for (let attempt = 0; attempt < 2; attempt++) {
+                const requestedPort = await requestPort();
+                try {
+                  await this.#sendPortToClient(
+                    { ...data, nonce },
+                    requestedPort,
+                  );
+                  break;
+                } catch (e) {
+                  try {
+                    requestedPort?.close?.();
+                  } catch {}
+                  if (attempt === 1) {
+                    console.warn(
+                      "SharedService: failed to transfer port after retry",
+                      e,
+                    );
+                  }
+                }
               }
             }
           },
@@ -149,7 +190,16 @@ export class SharedService extends EventTarget {
     if (!("serviceWorker" in navigator)) return;
     const serviceWorker = await navigator.serviceWorker.ready;
     // postMessage will neuter 'port'. Ensure it's only used once.
-    serviceWorker.active?.postMessage(message, [port]);
+    await new Promise((resolve, reject) => {
+      setTimeout(() => {
+        try {
+          serviceWorker.active?.postMessage(message, [port]);
+          resolve(null);
+        } catch (e) {
+          reject(e);
+        }
+      }, 0);
+    });
   }
 
   async #getClientId() {
@@ -229,7 +279,11 @@ export class SharedService extends EventTarget {
           "message",
           (event) => {
             if (event.data?.nonce === nonce) {
-              resolve(event.data.ports[0]);
+              // Prefer ports attached to the MessageEvent; fall back to data.ports if present
+              const portFromEvent =
+                (event.ports && event.ports[0]) ||
+                (event.data && event.data.ports && event.data.ports[0]);
+              resolve(portFromEvent || null);
               abortController.abort();
             }
           },

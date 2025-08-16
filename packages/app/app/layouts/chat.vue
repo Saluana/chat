@@ -1,51 +1,53 @@
 <template>
   <div class="w-screen h-screen scrollbar-custom">
-    <div class="hidden lg:block w-full h-full" v-if="isServer || isLargeScreen">
-      <SplitterGroup direction="horizontal" @layout="splitterLayout = $event">
-        <SplitterPanel
-          ref="desktopSidebarPanelRef"
-          as="aside"
-          @resize="handleDesktopSidebarResize"
-          :default-size="splitterLayout?.[0] ?? targetDesktopSidebarSize"
-          :max-size="50"
-          class="z-[20] border-neutral-300 dark:border-neutral-800 bg-neutral-200/50 dark:bg-neutral-950/30 overflow-hidden"
-          :class="[isDesktopSidebarOpen && 'border-r']"
-        >
-          <Sidebar @toggle="toggleDesktopSidebar" />
-        </SplitterPanel>
-        <SplitterResizeHandle v-if="isDesktopSidebarOpen" />
-        <SplitterPanel
-          :default-size="splitterLayout?.[1] ?? 100 - targetDesktopSidebarSize"
-          as="main"
-          class="bg-neutral-50 dark:bg-neutral-900"
-        >
+    <ClientOnly>
+      <template #fallback>
+        <main class="h-full block bg-neutral-50 dark:bg-neutral-900">
           <NuxtPage />
-        </SplitterPanel>
-      </SplitterGroup>
-    </div>
+        </main>
+      </template>
+      <div class="hidden lg:block w-full h-full" v-if="isLargeScreen">
+        <SplitterGroup direction="horizontal" @layout="splitterLayout = $event">
+          <SplitterPanel
+            ref="desktopSidebarPanelRef"
+            as="aside"
+            @resize="handleDesktopSidebarResize"
+            :default-size="splitterLayout?.[0] ?? targetDesktopSidebarSize"
+            :max-size="50"
+            class="z-[20] border-neutral-300 dark:border-neutral-800 bg-neutral-200/50 dark:bg-neutral-950/30 overflow-hidden"
+            :class="[isDesktopSidebarOpen && 'border-r']"
+          >
+            <Sidebar @toggle="toggleDesktopSidebar" />
+          </SplitterPanel>
+          <SplitterResizeHandle v-if="isDesktopSidebarOpen" />
+          <SplitterPanel
+            :default-size="
+              splitterLayout?.[1] ?? 100 - targetDesktopSidebarSize
+            "
+            as="main"
+            class="bg-neutral-50 dark:bg-neutral-900"
+          >
+            <NuxtPage />
+          </SplitterPanel>
+        </SplitterGroup>
+      </div>
 
-    <div class="block lg:hidden" v-if="isServer || !isLargeScreen">
-      <USlideover
-        side="left"
-        title="Sidebar"
-        description="Browse chats"
-        v-model:open="isMobileSidebarOpen"
-      >
-        <template #content>
-          <Sidebar
-            @toggle="isMobileSidebarOpen = false"
-            @new="isMobileSidebarOpen = false"
-          />
-        </template>
-      </USlideover>
-    </div>
-
-    <main
-      class="h-full block lg:hidden bg-neutral-200/50 dark:bg-neutral-900"
-      v-if="isServer || !isLargeScreen"
-    >
-      <NuxtPage />
-    </main>
+      <div class="block lg:hidden" v-if="!isLargeScreen">
+        <USlideover
+          side="left"
+          title="Sidebar"
+          description="Browse chats"
+          v-model:open="isMobileSidebarOpen"
+        >
+          <template #content>
+            <Sidebar
+              @toggle="isMobileSidebarOpen = false"
+              @new="isMobileSidebarOpen = false"
+            />
+          </template>
+        </USlideover>
+      </div>
+    </ClientOnly>
 
     <!-- Floating Action Buttons (Top Left) -->
     <ClientOnly>
@@ -69,24 +71,41 @@
       </div>
     </ClientOnly>
 
-    <div
-      v-if="isServer || !isLargeScreen"
-      class="flex lg:hidden absolute z-[10] top-4 left-4 floating-actions"
-    >
-      <UButton
-        icon="i-lucide-panel-left"
-        variant="ghost"
-        color="neutral"
-        @click="isMobileSidebarOpen = true"
-      />
-      <UModal :overlay="false" v-model:open="searchRef">
-        <UButton icon="i-lucide-search" variant="ghost" color="neutral" />
-        <template #content>
-          <SearchBox />
-        </template>
-      </UModal>
-      <UButton icon="i-lucide-plus" variant="soft" to="/chat" />
-    </div>
+    <ClientOnly>
+      <template #fallback>
+        <div
+          class="flex lg:hidden absolute z-[10] top-4 left-4 floating-actions"
+        >
+          <UButton icon="i-lucide-panel-left" variant="ghost" color="neutral" />
+          <UModal :overlay="false" v-model:open="searchRef">
+            <UButton icon="i-lucide-search" variant="ghost" color="neutral" />
+            <template #content>
+              <SearchBox />
+            </template>
+          </UModal>
+          <UButton icon="i-lucide-plus" variant="soft" to="/chat" />
+        </div>
+      </template>
+
+      <div
+        v-if="!isLargeScreen"
+        class="flex lg:hidden absolute z-[10] top-4 left-4 floating-actions"
+      >
+        <UButton
+          icon="i-lucide-panel-left"
+          variant="ghost"
+          color="neutral"
+          @click="isMobileSidebarOpen = true"
+        />
+        <UModal :overlay="false" v-model:open="searchRef">
+          <UButton icon="i-lucide-search" variant="ghost" color="neutral" />
+          <template #content>
+            <SearchBox />
+          </template>
+        </UModal>
+        <UButton icon="i-lucide-plus" variant="soft" to="/chat" />
+      </div>
+    </ClientOnly>
 
     <!-- Floating actions (Top Right) -->
     <div class="absolute z-[10] top-4 right-4 floating-actions">

@@ -122,7 +122,7 @@
       </div>
 
       <template #content>
-        <LazyAccountMenu :actions="actions" :cssVars="cssVars" />
+        <LazyFragmentsAccountMenu :actions="actions" :cssVars="cssVars" />
       </template>
     </UPopover>
     <template #fallback>
@@ -142,7 +142,7 @@ const pop = useTemplateRef("pop");
 const user = ref({
   user: {
     name: "User",
-    image: "path/to/image.jpg",
+    image: "/nuxflare.png",
   },
 });
 const name = computed(() => user.value.user?.name);

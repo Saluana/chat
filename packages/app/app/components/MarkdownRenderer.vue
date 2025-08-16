@@ -23,14 +23,15 @@ import { marked } from "marked";
 import { useIntersectionObserver } from "@vueuse/core";
 
 const emit = defineEmits(["rendered"]);
-const { content, chunked, variant } = withDefaults(
-  defineProps<{
-    content: string;
-    chunked?: boolean;
-    variant?: "user" | "assistant";
-  }>(),
-  { variant: "assistant" },
-);
+const {
+  content,
+  chunked,
+  variant = "assistant",
+} = defineProps<{
+  content: string;
+  chunked?: boolean;
+  variant?: "user" | "assistant";
+}>();
 const blocks = computed(() =>
   chunked ? marked.lexer(content || "").map((block) => block.raw) : [content],
 );
