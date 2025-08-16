@@ -32,18 +32,14 @@
           name="i-carbon:branch"
           class="size-3.5"
         />
-        <UTooltip
+        <span
           v-if="editableThreadId != thread.id"
-          :text="thread.title"
-          :disableHoverableContent="true"
+          class="text-sm font-medium text-neutral-500 dark:text-neutral-400 truncate"
+          @dblclick="editThread(thread)"
+          :title="thread.title"
         >
-          <span
-            class="text-sm font-medium text-neutral-500 dark:text-neutral-400 truncate"
-            @dblclick="editThread(thread)"
-          >
-            {{ thread.title }}
-          </span>
-        </UTooltip>
+          {{ thread.title }}
+        </span>
         <UInput
           v-if="editableThreadId === thread.id"
           :id="`thread-input-${thread.id}`"
@@ -101,17 +97,7 @@
               ]"
             />
             <template #content>
-              <div class="p-1 bg-white dark:bg-black rounded-lg min-w-35">
-                <div
-                  v-for="moreAction in moreActions"
-                  :key="moreAction.icon"
-                  class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800/70 font-semibold rounded cursor-pointer"
-                  @click="moreAction.action(thread)"
-                >
-                  <UIcon :name="moreAction.icon" class="size-4" />
-                  <span>{{ moreAction.name }}</span>
-                </div>
-              </div>
+              <LazyThreadMenu :moreActions="moreActions" :thread="thread" />
             </template>
           </UPopover>
         </div>
@@ -232,6 +218,10 @@ const confirmDelete = () => {
   openDeleteModal.value = false;
   threadToDelete.value = null;
 };
+</script>
+
+<script lang="ts">
+export default {};
 </script>
 
 <style scoped>

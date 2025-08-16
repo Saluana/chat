@@ -25,7 +25,7 @@ artifact_id: 0b2f7c3a-7c10-4c3a-9c9b-7b1a3c3d6c42
 ## 4. Progressive hydration of Sidebar/ThreadList
 
 - [ ] Wrap `Sidebar.vue` in a lightweight shell that renders header + New Chat instantly; lazy-load the thread lists using `defineAsyncComponent` or `ClientOnly` with `when-visible` sentinel. Requirements: 1,4.
-- [ ] Defer expensive icon sets and popovers until hover/focus (use dynamic import for popover content). Requirements: 4.
+- [x] Defer expensive icon sets and popovers until hover/focus (use dynamic import for popover content). Requirements: 4.
 
 ## 5. Lazy wa-sqlite/db initialization
 
