@@ -1,0 +1,15 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "typecheck-app",
+			"type": "shell",
+			"command": "bun --version >/dev/null 2>&1 || (echo \"Bun not installed\" && exit 1); cd packages/app && npx tsc -p tsconfig.json --noEmit",
+			"isBackground": false,
+			"problemMatcher": [
+				"$tsc"
+			],
+			"group": "build"
+		}
+	]
+}

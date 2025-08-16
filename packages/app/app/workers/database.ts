@@ -196,10 +196,22 @@ let vfs: any;
 let dbReadyResolvers: Array<() => void> = [];
 let isDbReady = false;
 
+export interface ThreadPreview {
+  id: string;
+  title: string;
+  updated_at: number;
+  last_message_at: number;
+  pinned: 0 | 1;
+  deleted: 0 | 1;
+  last_message_snippet: string;
+  message_count: number;
+}
+
 async function clearDirectoryRecursive(
   directoryHandle: FileSystemDirectoryHandle,
 ) {
-  for await (const entry of directoryHandle.values()) {
+  // Cast to any to access OPFS async iterator in TS targets lacking lib types
+  for await (const entry of (directoryHandle as any).values()) {
     if (entry.kind === "file") {
       await directoryHandle.removeEntry(entry.name);
     } else if (entry.kind === "directory") {
@@ -453,8 +465,42 @@ export const initDatabase = async () => {
 
   isDbReady = true;
   console.log("db ready!");
+  try {
+    // mark readiness for perf tooling
+    if (typeof performance !== "undefined" && performance.mark) {
+      performance.mark("db_worker_ready");
+    }
+    // broadcast an event for listeners
+    dispatchEvent(new CustomEvent("dbReady"));
+  } catch {
+    // no-op in environments without performance or CustomEvent
+  }
   dbReadyResolvers.forEach((resolve) => resolve());
   dbReadyResolvers = [];
+};
+
+/**
+ * Hint the worker to initialize during idle time without blocking UI.
+ * Safe to call multiple times.
+ */
+export const warmupDatabase = () => {
+  if (isDbReady || isStarting) return;
+  const kickoff = () => initDatabase();
+  // Prefer requestIdleCallback when available
+  // @ts-ignore - not in lib.dom.d.ts for some TS targets
+  const ric:
+    | ((cb: () => void, opts?: { timeout?: number }) => number)
+    | undefined = (globalThis as any).requestIdleCallback;
+  if (typeof ric === "function") ric(() => kickoff(), { timeout: 500 });
+  else setTimeout(kickoff, 0);
+};
+
+/**
+ * Subscribe to DB ready without awaiting a promise. Invokes immediately if ready.
+ */
+export const onDbReady = (cb: () => void) => {
+  if (isDbReady) cb();
+  else dbReadyResolvers.push(cb);
 };
 
 export const dbExec = async ({
@@ -483,3 +529,62 @@ export const dbExec = async ({
     changes: sqlite3.changes(db),
   };
 };
+
+/**
+ * Query minimal preview rows for threads with deterministic ordering.
+ * Enforces: pinned DESC, last_message_at DESC, updated_at DESC.
+ */
+export async function getThreadPreviews(): Promise<ThreadPreview[]> {
+  await waitForDatabase();
+  const sql = `
+    SELECT
+      t.id,
+      t.title,
+      t.updated_at,
+      t.last_message_at,
+      t.pinned,
+      t.deleted,
+      SUBSTR(COALESCE((
+        SELECT m2.content
+        FROM messages m2
+        WHERE m2.thread_id = t.id AND m2.deleted = 0
+        ORDER BY m2.created_at DESC, m2.message_index DESC
+        LIMIT 1
+      ), ''), 1, 140) AS last_message_snippet,
+      (
+        SELECT COUNT(1)
+        FROM messages m3
+        WHERE m3.thread_id = t.id AND m3.deleted = 0
+      ) AS message_count
+    FROM threads t
+    WHERE t.deleted = 0
+    ORDER BY t.pinned DESC, t.last_message_at DESC, t.updated_at DESC;
+  `;
+  const items: ThreadPreview[] = [];
+  for await (const stmt of sqlite3.statements(db, sql)) {
+    while ((await sqlite3.step(stmt)) === SQLite.SQLITE_ROW) {
+      const row = sqlite3.row(stmt) as any[];
+      const [
+        id,
+        title,
+        updated_at,
+        last_message_at,
+        pinned,
+        deleted,
+        last_message_snippet,
+        message_count,
+      ] = row;
+      items.push({
+        id: String(id),
+        title: String(title ?? ""),
+        updated_at: Number(updated_at ?? 0),
+        last_message_at: Number(last_message_at ?? 0),
+        pinned: Number(pinned ?? 0) as 0 | 1,
+        deleted: Number(deleted ?? 0) as 0 | 1,
+        last_message_snippet: String(last_message_snippet ?? ""),
+        message_count: Number(message_count ?? 0),
+      });
+    }
+  }
+  return items;
+}
