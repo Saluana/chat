@@ -93,6 +93,10 @@ packages/
           ProseThead.vue
           ProseTr.vue
           ProseUl.vue
+        fragments/
+          AccountMenu.vue
+          ThreadMenu.vue
+        AccountBarSkeleton.vue
         AssistantErrorMessage.vue
         AssistantMessage.vue
         ChatThread.vue
@@ -100,6 +104,7 @@ packages/
         LoaderSpin.vue
         MarkdownChunkRenderer.client.vue
         MarkdownRenderer.vue
+        MarkdownSkeleton.vue
         ModelSelector.vue
         Reasoning.vue
         ReasoningBudget.vue
@@ -107,13 +112,18 @@ packages/
         Settings.vue
         Sidebar.vue
         StreamingMessage.vue
+        ThreadLists.client.vue
+        ThreadLists.vue
+        ThreadListSkeleton.vue
         WebSearch.vue
       composables/
         useModelStore.ts
         useOpenRouterAuth.ts
         usePromptStore.ts
+        useRenderGate.ts
         useSearchRef.ts
         useSettingsRef.ts
+        useThreadsPreview.ts
         useThreadsStore.ts
       layouts/
         chat.vue
@@ -122,16 +132,22 @@ packages/
         openrouter-callback.vue
       plugins/
         00-polyfills.client.ts
+        markdown-warmup.client.ts
+        perf.client.ts
         sync.client.ts
       utils/
+        db-facade.ts
+        markdown-lazy.ts
         markdown.ts
         models-service.ts
+        preview-cache.ts
         showToast.ts
         sqlite.ts
         sync-service.ts
         uuid.ts
       workers/
         database.ts
+        markdown.ts
       app.config.ts
       app.vue
     public/
@@ -174,6 +190,10 @@ planning/
     requirements.md
     tasks.md
   openrouter-models/
+    design.md
+    requirements.md
+    tasks.md
+  perf-boot/
     design.md
     requirements.md
     tasks.md
@@ -917,6 +937,77 @@ pre code .line {
 </template>
 ````
 
+## File: packages/app/app/components/fragments/AccountMenu.vue
+````vue
+<template>
+  <div
+    class="p-1 bg-white dark:bg-black rounded-lg w-[var(--width)]"
+    :style="cssVars"
+  >
+    <div
+      v-for="action in actions"
+      :key="action.icon"
+      class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800/70 font-semibold cursor-pointer"
+      @click="action.action()"
+    >
+      <UIcon :name="action.icon" class="size-4" />
+      <span>{{ action.name }}</span>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
+const props = defineProps<{ actions: any[]; cssVars: any }>();
+</script>
+````
+
+## File: packages/app/app/components/fragments/ThreadMenu.vue
+````vue
+<template>
+  <div class="p-1 bg-white dark:bg-black rounded-lg min-w-35">
+    <div
+      v-for="moreAction in moreActions"
+      :key="moreAction.icon"
+      class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800/70 font-semibold rounded cursor-pointer"
+      @click="moreAction.action(thread)"
+    >
+      <UIcon :name="moreAction.icon" class="size-4" />
+      <span>{{ moreAction.name }}</span>
+    </div>
+  </div>
+</template>
+<script setup lang="ts">
+const props = defineProps<{ moreActions: any[]; thread: any }>();
+</script>
+````
+
+## File: packages/app/app/components/AccountBarSkeleton.vue
+````vue
+<template>
+  <div class="sticky left-0 bottom-0 w-full z-10 sidebar-bg">
+    <div class="p-2 border-t border-neutral-300 dark:border-neutral-800">
+      <div class="p-2.5 flex justify-between items-center rounded-lg">
+        <div class="space-x-2 flex items-center animate-pulse select-none">
+          <div
+            class="w-6 h-6 rounded-full bg-neutral-300 dark:bg-neutral-700"
+          />
+          <div class="h-3 w-20 rounded bg-neutral-300 dark:bg-neutral-700" />
+          <div
+            class="ml-2 w-3 h-3 rounded-full bg-neutral-300 dark:bg-neutral-700"
+          />
+        </div>
+        <div class="flex items-center gap-1 text-neutral-400">
+          <div class="w-4 h-4 rounded bg-neutral-300 dark:bg-neutral-700" />
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+// Presentational only
+</script>
+````
+
 ## File: packages/app/app/components/LoaderSpin.vue
 ````vue
 <template>
@@ -939,6 +1030,168 @@ const props = defineProps<{
   text?: string;
   size?: number;
 }>();
+</script>
+````
+
+## File: packages/app/app/components/MarkdownSkeleton.vue
+````vue
+<template>
+  <div class="w-full animate-pulse select-none">
+    <div v-if="variant === 'user'" class="flex flex-col items-end gap-2">
+      <div class="h-3 w-7/12 rounded bg-neutral-200 dark:bg-neutral-700" />
+      <div class="h-3 w-5/12 rounded bg-neutral-200 dark:bg-neutral-700" />
+    </div>
+    <div v-else class="flex flex-col gap-2">
+      <div class="h-3 w-9/12 rounded bg-neutral-200 dark:bg-neutral-700" />
+      <div class="h-3 w-11/12 rounded bg-neutral-200 dark:bg-neutral-700" />
+      <div class="h-3 w-10/12 rounded bg-neutral-200 dark:bg-neutral-700" />
+      <div class="h-3 w-8/12 rounded bg-neutral-200 dark:bg-neutral-700" />
+      <div class="h-3 w-6/12 rounded bg-neutral-200 dark:bg-neutral-700" />
+      <div class="h-3 w-3/12 rounded bg-neutral-200 dark:bg-neutral-700" />
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+withDefaults(defineProps<{ variant?: "user" | "assistant" }>(), {
+  variant: "assistant",
+});
+</script>
+````
+
+## File: packages/app/app/components/ThreadLists.client.vue
+````vue
+<template>
+  <ClientOnly>
+    <div ref="root" class="min-h-[200px]">
+      <ThreadListSkeleton v-if="!visible" />
+      <template v-else>
+        <LazyChatThread
+          v-if="pinned?.pinned?.length"
+          :threads="pinned"
+          :pinned="true"
+        />
+        <LazyChatThread :threads="unpinned" :pinned="false" />
+        <div class="h-10" />
+      </template>
+    </div>
+  </ClientOnly>
+</template>
+
+<script setup lang="ts">
+import { useIntersectionObserver } from "@vueuse/core";
+const props = defineProps<{ pinned: any; unpinned: any }>();
+const root = ref<HTMLElement | null>(null);
+const visible = ref(false);
+
+onMounted(() => {
+  const { stop } = useIntersectionObserver(
+    root,
+    ([entry]) => {
+      if (!entry) return;
+      if (entry.isIntersecting) {
+        visible.value = true;
+        stop();
+      }
+    },
+    { rootMargin: "200px 0px", threshold: 0.01 },
+  );
+});
+</script>
+
+<script lang="ts">
+export default {
+  components: {
+    ThreadListSkeleton: () => import("./ThreadListSkeleton.vue"),
+  },
+};
+</script>
+````
+
+## File: packages/app/app/components/ThreadLists.vue
+````vue
+<template>
+  <div ref="root">
+    <ThreadListSkeleton v-if="!hydrated" />
+    <template v-else>
+      <ChatThread
+        v-if="pinned?.pinned?.length"
+        :threads="pinned"
+        :pinned="true"
+      />
+      <ChatThread :threads="unpinned" :pinned="false" />
+      <div class="h-10" />
+    </template>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { useIntersectionObserver } from "@vueuse/core";
+const props = defineProps<{ pinned: any; unpinned: any }>();
+const root = ref<HTMLElement | null>(null);
+const hydrated = ref(false);
+
+if (import.meta.client) {
+  // hydrate immediately on client, but schedule list rendering next tick to unblock paint
+  queueMicrotask(() => (hydrated.value = true));
+}
+
+onMounted(() => {
+  // Optional: attach observer to pre-hydrate when near viewport without blocking
+  const { stop } = useIntersectionObserver(
+    root,
+    ([entry]) => {
+      if (!entry) return;
+      if (entry.isIntersecting) {
+        hydrated.value = true;
+        stop();
+      }
+    },
+    { rootMargin: "300px 0px", threshold: 0.01 },
+  );
+});
+</script>
+
+<script lang="ts">
+export default {
+  components: {
+    ThreadListSkeleton: () => import("./ThreadListSkeleton.vue"),
+    ChatThread: () => import("./ChatThread.vue"),
+  },
+};
+</script>
+````
+
+## File: packages/app/app/components/ThreadListSkeleton.vue
+````vue
+<template>
+  <div class="space-y-4 p-5">
+    <div class="space-y-2">
+      <div class="h-3 w-16 rounded bg-neutral-200 dark:bg-neutral-800" />
+      <div class="space-y-2">
+        <div
+          v-for="i in 3"
+          :key="`p-${i}`"
+          class="h-8 w-full rounded bg-neutral-100 dark:bg-neutral-800/60"
+        />
+      </div>
+    </div>
+    <div class="space-y-2">
+      <div class="h-3 w-16 rounded bg-neutral-200 dark:bg-neutral-800" />
+      <div class="space-y-2">
+        <div
+          v-for="i in 7"
+          :key="`u-${i}`"
+          class="h-8 w-full rounded bg-neutral-100 dark:bg-neutral-800/60"
+        />
+      </div>
+    </div>
+    <div class="h-10" />
+  </div>
+</template>
+
+<script setup lang="ts">
+// Pure skeleton
 </script>
 ````
 
@@ -1001,6 +1254,457 @@ export const useSettingsRef = () => {
 export default defineNuxtPlugin(() => {
   // no-op: using internal uuid utility instead of mutating globals
 });
+````
+
+## File: packages/app/app/utils/db-facade.ts
+````typescript
+// Lightweight DB facade: caches thread previews in IndexedDB with a localStorage fallback
+// No runtime deps; can be swapped to Dexie later without changing callsites.
+
+export type ThreadPreview = {
+  id: string;
+  title: string;
+  pinned?: boolean;
+  updatedAt?: number;
+};
+
+const IDB_DB = "nuxflare-cache-v1";
+const IDB_STORE = "threads_preview";
+const LS_KEY = "ui_threads_preview_v1";
+
+let idbOpenPromise: Promise<IDBDatabase> | null = null;
+
+function openIDB(): Promise<IDBDatabase> {
+  if (typeof indexedDB === "undefined") {
+    return Promise.reject(new Error("IndexedDB not available"));
+  }
+  if (!idbOpenPromise) {
+    idbOpenPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(IDB_DB, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          db.createObjectStore(IDB_STORE);
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+  return idbOpenPromise;
+}
+
+async function idbGet<T>(key: string): Promise<T | undefined> {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readonly");
+    const store = tx.objectStore(IDB_STORE);
+    const req = store.get(key);
+    req.onsuccess = () => resolve(req.result as T | undefined);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function idbSet<T>(key: string, value: T): Promise<void> {
+  const db = await openIDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(IDB_STORE, "readwrite");
+    const store = tx.objectStore(IDB_STORE);
+    const req = store.put(value as any, key);
+    req.onsuccess = () => resolve();
+    req.onerror = () => reject(req.error);
+  });
+}
+
+export async function init(): Promise<void> {
+  try {
+    await openIDB();
+  } catch {
+    // ignore
+  }
+}
+
+export async function getThreadsPreview(): Promise<ThreadPreview[]> {
+  // Fast path: IndexedDB
+  try {
+    const data = await idbGet<ThreadPreview[]>("preview");
+    if (Array.isArray(data) && data.length) return data;
+  } catch {}
+  // Fallback: localStorage
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed as ThreadPreview[];
+    }
+  } catch {}
+  return [];
+}
+
+export async function setThreadsPreview(
+  preview: ThreadPreview[],
+): Promise<void> {
+  // Store in both IDB and localStorage for super-fast boot fallback
+  try {
+    await idbSet("preview", preview);
+  } catch {}
+  try {
+    localStorage.setItem(LS_KEY, JSON.stringify(preview));
+  } catch {}
+}
+
+// Optional helper: schedule a cache refresh without blocking
+export function schedulePreviewRefresh(run: () => Promise<ThreadPreview[]>) {
+  const schedule = (cb: () => void) =>
+    (window as any).requestIdleCallback
+      ? (window as any).requestIdleCallback(cb, { timeout: 1200 })
+      : setTimeout(cb, 250);
+  schedule(async () => {
+    try {
+      const data = await run();
+      if (Array.isArray(data) && data.length) await setThreadsPreview(data);
+    } catch {}
+  });
+}
+````
+
+## File: packages/app/app/utils/markdown-lazy.ts
+````typescript
+// Lazy Markdown renderer: dynamically loads heavy deps on first use.
+// Prefers a Web Worker to keep the main thread smooth, with an incremental in-thread fallback.
+// Exposes a single function renderMarkdownChunk() with internal caching.
+
+let worker: Worker | null = null;
+let workerStatus: "idle" | "base" | "heavy" | "failed" = "idle";
+// In-thread processors (fallback path)
+let baseNoMathLocal: Promise<any> | null = null;
+let baseWithMathLocal: Promise<any> | null = null;
+let enhancedLocal: Promise<any> | null = null;
+const chunkCache = new Map<string, string>();
+const processingQueue = new Map<string, Promise<string>>();
+
+async function markHeavyDepsReady() {
+  try {
+    const { useNuxtApp } = await import("#app");
+    const { $perf } = useNuxtApp();
+    ($perf as any)?.markHeavyDepsLoaded?.();
+  } catch {
+    try {
+      window.dispatchEvent(new Event("perf:heavy_deps_loaded"));
+    } catch {}
+  }
+}
+
+function maybeInitWorker() {
+  if (typeof window === "undefined") return;
+  if (worker) return;
+  try {
+    // Use Vite-friendly worker creation
+    worker = new Worker(new URL("../workers/markdown.ts", import.meta.url), {
+      type: "module",
+    });
+    const onMessage = (e: MessageEvent) => {
+      const t = e.data?.type;
+      if (t === "base_ready") {
+        // Consider base pipeline sufficient for responsiveness
+        markHeavyDepsReady();
+        try {
+          window.dispatchEvent(new Event("markdown:base_ready"));
+        } catch {}
+        // After base is ready, warm up heavy deps when idle
+        const scheduleIdle = (cb: () => void) =>
+          (window as any).requestIdleCallback
+            ? (window as any).requestIdleCallback(cb, { timeout: 1000 })
+            : setTimeout(cb, 400);
+        scheduleIdle(() => {
+          try {
+            worker!.postMessage({ type: "warmup", mode: "heavy" });
+          } catch {}
+        });
+        workerStatus = "base";
+      } else if (t === "heavy_ready") {
+        try {
+          window.dispatchEvent(new Event("markdown:heavy_ready"));
+        } catch {}
+        workerStatus = "heavy";
+      }
+    };
+    worker.addEventListener("message", onMessage as any);
+    worker.addEventListener("error", (err) => {
+      console.warn("[markdown-worker] error, falling back", err);
+      try {
+        worker?.removeEventListener("message", onMessage as any);
+      } catch {}
+      workerStatus = "failed";
+      worker = null;
+    });
+    worker.addEventListener("messageerror", (err) => {
+      console.warn("[markdown-worker] messageerror", err);
+    });
+    // Idle warmup to initialize heavy deps sooner without blocking
+    const scheduleIdle = (cb: () => void) =>
+      (window as any).requestIdleCallback
+        ? (window as any).requestIdleCallback(cb, { timeout: 500 })
+        : setTimeout(cb, 200);
+    scheduleIdle(() => {
+      try {
+        worker!.postMessage({ type: "warmup", mode: "base" });
+      } catch {}
+    });
+  } catch {
+    // Fallback: Vite-style ?worker import
+    (async () => {
+      try {
+        const mod: any = await import("~/workers/markdown?worker");
+        worker = new mod.default();
+        workerStatus = "idle";
+      } catch (e) {
+        console.warn("[markdown-worker] creation failed, using fallback", e);
+        worker = null;
+        workerStatus = "failed";
+      }
+    })();
+  }
+}
+
+function hasCodeFences(text: string): boolean {
+  return /```|~~~/.test(text);
+}
+function hasMath(text: string): boolean {
+  return /(\$\$[^]*?\$\$)|(\$[^\n$]+\$)|(\\\(|\\\)|\\\[|\\\])/.test(text);
+}
+
+async function initBaseNoMathLocalProc() {
+  if (!baseNoMathLocal) {
+    baseNoMathLocal = (async () => {
+      const [
+        { unified },
+        remarkParse,
+        remarkGfm,
+        remarkRehype,
+        rehypeStringify,
+      ] = await Promise.all([
+        import("unified"),
+        import("remark-parse"),
+        import("remark-gfm"),
+        import("remark-rehype"),
+        import("rehype-stringify"),
+      ]);
+      const proc = (unified as any)()
+        .use((remarkParse as any).default || (remarkParse as any))
+        .use((remarkGfm as any).default || (remarkGfm as any))
+        .use((remarkRehype as any).default || (remarkRehype as any))
+        .use((rehypeStringify as any).default || (rehypeStringify as any));
+      // Mark responsive-ready when base is available
+      markHeavyDepsReady();
+      return proc;
+    })();
+  }
+  return baseNoMathLocal;
+}
+
+async function initBaseWithMathLocalProc() {
+  if (!baseWithMathLocal) {
+    baseWithMathLocal = (async () => {
+      const [
+        { unified },
+        remarkParse,
+        remarkGfm,
+        remarkMath,
+        remarkRehype,
+        rehypeKatex,
+        rehypeStringify,
+      ] = await Promise.all([
+        import("unified"),
+        import("remark-parse"),
+        import("remark-gfm"),
+        import("remark-math"),
+        import("remark-rehype"),
+        import("rehype-katex"),
+        import("rehype-stringify"),
+      ]);
+      const proc = (unified as any)()
+        .use((remarkParse as any).default || (remarkParse as any))
+        .use((remarkGfm as any).default || (remarkGfm as any))
+        .use((remarkMath as any).default || (remarkMath as any))
+        .use((remarkRehype as any).default || (remarkRehype as any))
+        .use((rehypeKatex as any).default || (rehypeKatex as any))
+        .use((rehypeStringify as any).default || (rehypeStringify as any));
+      markHeavyDepsReady();
+      return proc;
+    })();
+  }
+  return baseWithMathLocal;
+}
+
+async function initEnhancedLocalProc() {
+  if (!enhancedLocal) {
+    enhancedLocal = (async () => {
+      const [
+        { unified },
+        remarkParse,
+        remarkGfm,
+        remarkMath,
+        remarkRehype,
+        rehypeKatex,
+        rehypeStringify,
+        rehypeShiki,
+      ] = await Promise.all([
+        import("unified"),
+        import("remark-parse"),
+        import("remark-gfm"),
+        import("remark-math"),
+        import("remark-rehype"),
+        import("rehype-katex"),
+        import("rehype-stringify"),
+        import("@shikijs/rehype"),
+      ]);
+      const proc = (unified as any)()
+        .use((remarkParse as any).default || (remarkParse as any))
+        .use((remarkGfm as any).default || (remarkGfm as any))
+        .use((remarkMath as any).default || (remarkMath as any))
+        .use((remarkRehype as any).default || (remarkRehype as any))
+        .use((rehypeShiki as any).default || (rehypeShiki as any), {
+          defaultLanguage: "txt",
+          fallbackLanguage: "txt",
+          themes: { light: "vitesse-light", dark: "vitesse-dark" },
+        })
+        .use((rehypeKatex as any).default || (rehypeKatex as any))
+        .use((rehypeStringify as any).default || (rehypeStringify as any));
+      return proc;
+    })();
+  }
+  return enhancedLocal;
+}
+
+async function sha1(text: string): Promise<string> {
+  const buf = await crypto.subtle.digest(
+    "SHA-1",
+    new TextEncoder().encode(text),
+  );
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+export async function renderMarkdownChunk(chunk: string): Promise<string> {
+  if (!chunk) return "";
+  const hash = await sha1(chunk);
+  const cached = chunkCache.get(hash);
+  if (cached) return cached;
+
+  const existing = processingQueue.get(hash);
+  if (existing) return existing;
+
+  // Prefer worker path; initialize it if possible
+  maybeInitWorker();
+  let p: Promise<string>;
+  if (worker) {
+    p = new Promise<string>((resolve, reject) => {
+      const id = crypto.randomUUID();
+      const onMsg = (e: MessageEvent) => {
+        const d = e.data;
+        if (!d || d.id !== id) return;
+        if (d.type === "result") {
+          worker?.removeEventListener("message", onMsg as any);
+          resolve(String(d.html || ""));
+        } else if (d.type === "error") {
+          worker?.removeEventListener("message", onMsg as any);
+          reject(new Error(String(d.error)));
+        }
+      };
+      worker!.addEventListener("message", onMsg as any);
+      worker!.postMessage({ type: "render", id, text: chunk });
+    }).catch(async (err) => {
+      // Fallback to in-thread processing on worker failure
+      console.warn("[markdown-worker] render failed, using fallback", err);
+      let file: any;
+      if (hasCodeFences(chunk)) {
+        // Try fast base first to avoid blocking
+        const base = hasMath(chunk)
+          ? await initBaseWithMathLocalProc()
+          : await initBaseNoMathLocalProc();
+        try {
+          file = await base.process(chunk);
+        } catch {
+          const enh = await initEnhancedLocalProc();
+          file = await enh.process(chunk);
+        }
+      } else {
+        const base = hasMath(chunk)
+          ? await initBaseWithMathLocalProc()
+          : await initBaseNoMathLocalProc();
+        file = await base.process(chunk);
+      }
+      return String(file);
+    });
+  } else {
+    // No worker (or failed): use incremental local pipeline
+    if (hasCodeFences(chunk)) {
+      const proc =
+        workerStatus === "failed"
+          ? await initBaseNoMathLocalProc()
+          : await initBaseNoMathLocalProc();
+      try {
+        const file = await proc.process(chunk);
+        p = Promise.resolve(String(file));
+      } catch {
+        const enh = await initEnhancedLocalProc();
+        const file = await enh.process(chunk);
+        p = Promise.resolve(String(file));
+      }
+    } else {
+      const base = hasMath(chunk)
+        ? await initBaseWithMathLocalProc()
+        : await initBaseNoMathLocalProc();
+      const file = await base.process(chunk);
+      p = Promise.resolve(String(file));
+    }
+  }
+
+  processingQueue.set(hash, p);
+  const result = await p;
+  processingQueue.delete(hash);
+  chunkCache.set(hash, result);
+  return result;
+}
+
+// Public warmup entrypoint: initialize base pipeline early and optionally heavy
+export async function warmupMarkdown(mode: "base" | "heavy" = "base") {
+  if (typeof window === "undefined") return;
+  try {
+    maybeInitWorker();
+    if (worker) {
+      // Always warm base first
+      worker.postMessage({ type: "warmup", mode: "base" });
+      if (mode === "heavy") {
+        const scheduleIdle = (cb: () => void) =>
+          (window as any).requestIdleCallback
+            ? (window as any).requestIdleCallback(cb, { timeout: 1000 })
+            : setTimeout(cb, 300);
+        scheduleIdle(() => {
+          try {
+            worker!.postMessage({ type: "warmup", mode: "heavy" });
+          } catch {}
+        });
+      }
+      return;
+    }
+    // No worker: prepare local base pipeline to reduce first-use cost
+    await initBaseNoMathLocalProc();
+    if (mode === "heavy") {
+      const scheduleIdle = (cb: () => void) =>
+        (window as any).requestIdleCallback
+          ? (window as any).requestIdleCallback(cb, { timeout: 1000 })
+          : setTimeout(cb, 300);
+      scheduleIdle(() => {
+        initEnhancedLocalProc().catch(() => {});
+      });
+    }
+  } catch {
+    // ignore
+  }
+}
 ````
 
 ## File: packages/app/app/utils/models-service.ts
@@ -1206,6 +1910,149 @@ export const modelsService = {
 export default modelsService;
 ````
 
+## File: packages/app/app/utils/preview-cache.ts
+````typescript
+/*
+  PreviewCache: IndexedDB-backed preview cache with in-memory fallback.
+  - Store name: 'threads_preview' in DB 'nuxflare-preview-cache'
+  - Single-record per version key: 'v' + version
+  - Safe on SSR: falls back to in-memory and never touches IDB on server
+*/
+
+export interface ThreadPreview {
+  id: string;
+  title: string;
+  updated_at: number;
+  last_message_at: number;
+  pinned: 0 | 1;
+  deleted: 0 | 1;
+  last_message_snippet: string;
+  message_count: number;
+}
+
+export interface PreviewEnvelope {
+  version: number;
+  generated_at: number; // epoch ms
+  items: ThreadPreview[];
+}
+
+export const PREVIEW_CACHE_VERSION = 1 as const;
+export const versionKeyFor = (version = PREVIEW_CACHE_VERSION) => `v${version}`;
+
+const DB_NAME = "nuxflare-preview-cache";
+const STORE = "threads_preview";
+
+type MaybeEnvelope = PreviewEnvelope | undefined;
+
+class PreviewCacheImpl {
+  private memory = new Map<string, PreviewEnvelope>();
+  private openPromise: Promise<IDBDatabase> | null = null;
+
+  private hasIDB(): boolean {
+    return typeof indexedDB !== "undefined" && !!indexedDB;
+  }
+
+  private async openDB(): Promise<IDBDatabase> {
+    if (!this.hasIDB()) {
+      // Dummy never-resolving promise if called accidentally on server; callers should catch
+      // but we also guard all public calls to avoid reaching here when IDB is unavailable.
+      return Promise.reject(new Error("IndexedDB unavailable"));
+    }
+    if (this.openPromise) return this.openPromise;
+    this.openPromise = new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = (ev) => {
+        const db = (ev.target as IDBOpenDBRequest).result;
+        if (!db.objectStoreNames.contains(STORE)) {
+          db.createObjectStore(STORE);
+        }
+      };
+      req.onsuccess = (ev) => resolve((ev.target as IDBOpenDBRequest).result);
+      req.onerror = (ev) => {
+        this.openPromise = null;
+        reject((ev.target as IDBOpenDBRequest).error ?? new Error("IDB error"));
+      };
+    });
+    return this.openPromise;
+  }
+
+  private async idbGet(key: string): Promise<MaybeEnvelope> {
+    const db = await this.openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction([STORE], "readonly");
+      const store = tx.objectStore(STORE);
+      const req = store.get(key);
+      req.onsuccess = (ev) =>
+        resolve((ev.target as IDBRequest).result as MaybeEnvelope);
+      req.onerror = (ev) =>
+        reject((ev.target as IDBRequest).error ?? new Error("get failed"));
+    });
+  }
+
+  private async idbSet(key: string, value: PreviewEnvelope): Promise<void> {
+    const db = await this.openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction([STORE], "readwrite");
+      const store = tx.objectStore(STORE);
+      const req = store.put(value, key);
+      req.onsuccess = () => resolve();
+      req.onerror = (ev) =>
+        reject((ev.target as IDBRequest).error ?? new Error("set failed"));
+    });
+  }
+
+  private async idbClear(): Promise<void> {
+    const db = await this.openDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction([STORE], "readwrite");
+      const store = tx.objectStore(STORE);
+      const req = store.clear();
+      req.onsuccess = () => resolve();
+      req.onerror = (ev) =>
+        reject((ev.target as IDBRequest).error ?? new Error("clear failed"));
+    });
+  }
+
+  // Public API
+  async get(versionKey: string): Promise<MaybeEnvelope> {
+    // Try IDB fast-path if available; otherwise memory
+    if (this.hasIDB()) {
+      try {
+        const res = await this.idbGet(versionKey);
+        if (res) return res;
+      } catch {
+        // fallthrough to memory
+      }
+    }
+    return this.memory.get(versionKey);
+  }
+
+  async set(versionKey: string, envelope: PreviewEnvelope): Promise<void> {
+    // Privacy/safety: ensure we only store allowed fields
+    // (Assumes envelope was constructed per design elsewhere.)
+    this.memory.set(versionKey, envelope);
+    if (!this.hasIDB()) return;
+    try {
+      await this.idbSet(versionKey, envelope);
+    } catch {
+      // keep memory fallback
+    }
+  }
+
+  async clearAll(): Promise<void> {
+    this.memory.clear();
+    if (!this.hasIDB()) return;
+    try {
+      await this.idbClear();
+    } catch {
+      // ignore
+    }
+  }
+}
+
+export const PreviewCache = new PreviewCacheImpl();
+````
+
 ## File: packages/app/app/utils/showToast.ts
 ````typescript
 export default function showToast(message: string = "", error: string = "") {
@@ -1244,6 +2091,182 @@ export function uuidv4(): string {
   );
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
+````
+
+## File: packages/app/app/workers/markdown.ts
+````typescript
+// Markdown Web Worker: fast base pipeline first, defer Shiki until needed.
+// Protocol:
+//  - { type: 'warmup', mode?: 'base'|'heavy' }
+//  - { type: 'render', id: string, text: string }
+//  - posts { type: 'base_ready' } when base pipeline is ready
+//  - posts { type: 'heavy_ready' } when Shiki is loaded
+//  - posts { type: 'result', id, html } or { type: 'error', id, error }
+
+type Proc = { process: (input: string) => Promise<any> };
+
+let baseNoMathInit: Promise<Proc> | null = null;
+let baseWithMathInit: Promise<Proc> | null = null;
+let enhancedInit: Promise<Proc> | null = null;
+let shikiLoaded = false;
+
+async function initBaseNoMath(): Promise<Proc> {
+  if (!baseNoMathInit) {
+    baseNoMathInit = (async () => {
+      const [
+        { unified },
+        remarkParse,
+        remarkGfm,
+        remarkRehype,
+        rehypeStringify,
+      ] = await Promise.all([
+        import("unified"),
+        import("remark-parse"),
+        import("remark-gfm"),
+        import("remark-rehype"),
+        import("rehype-stringify"),
+      ]);
+
+      const proc = (unified as any)()
+        .use((remarkParse as any).default || (remarkParse as any))
+        .use((remarkGfm as any).default || (remarkGfm as any))
+        .use((remarkRehype as any).default || (remarkRehype as any))
+        .use((rehypeStringify as any).default || (rehypeStringify as any));
+
+      (self as any).postMessage({ type: "base_ready" });
+      return proc as Proc;
+    })();
+  }
+  return baseNoMathInit;
+}
+
+async function initBaseWithMath(): Promise<Proc> {
+  if (!baseWithMathInit) {
+    baseWithMathInit = (async () => {
+      const [
+        { unified },
+        remarkParse,
+        remarkGfm,
+        remarkMath,
+        remarkRehype,
+        rehypeKatex,
+        rehypeStringify,
+      ] = await Promise.all([
+        import("unified"),
+        import("remark-parse"),
+        import("remark-gfm"),
+        import("remark-math"),
+        import("remark-rehype"),
+        import("rehype-katex"),
+        import("rehype-stringify"),
+      ]);
+
+      const proc = (unified as any)()
+        .use((remarkParse as any).default || (remarkParse as any))
+        .use((remarkGfm as any).default || (remarkGfm as any))
+        .use((remarkMath as any).default || (remarkMath as any))
+        .use((remarkRehype as any).default || (remarkRehype as any))
+        .use((rehypeKatex as any).default || (rehypeKatex as any))
+        .use((rehypeStringify as any).default || (rehypeStringify as any));
+
+      return proc as Proc;
+    })();
+  }
+  return baseWithMathInit;
+}
+
+async function initEnhanced(): Promise<Proc> {
+  if (!enhancedInit) {
+    enhancedInit = (async () => {
+      const [
+        { unified },
+        remarkParse,
+        remarkGfm,
+        remarkMath,
+        remarkRehype,
+        rehypeKatex,
+        rehypeStringify,
+        rehypeShiki,
+      ] = await Promise.all([
+        import("unified"),
+        import("remark-parse"),
+        import("remark-gfm"),
+        import("remark-math"),
+        import("remark-rehype"),
+        import("rehype-katex"),
+        import("rehype-stringify"),
+        import("@shikijs/rehype"),
+      ]);
+
+      const proc = (unified as any)()
+        .use((remarkParse as any).default || (remarkParse as any))
+        .use((remarkGfm as any).default || (remarkGfm as any))
+        .use((remarkMath as any).default || (remarkMath as any))
+        .use((remarkRehype as any).default || (remarkRehype as any))
+        .use((rehypeShiki as any).default || (rehypeShiki as any), {
+          defaultLanguage: "txt",
+          fallbackLanguage: "txt",
+          themes: { light: "vitesse-light", dark: "vitesse-dark" },
+        })
+        .use((rehypeKatex as any).default || (rehypeKatex as any))
+        .use((rehypeStringify as any).default || (rehypeStringify as any));
+
+      shikiLoaded = true;
+      (self as any).postMessage({ type: "heavy_ready" });
+      return proc as Proc;
+    })();
+  }
+  return enhancedInit;
+}
+
+function hasCodeFences(text: string): boolean {
+  return /```|~~~/.test(text);
+}
+function hasMath(text: string): boolean {
+  return /(\$\$[\s\S]*?\$\$)|(\$[^\n$]+\$)|(\\\(|\\\)|\\\[|\\\])/.test(text);
+}
+
+addEventListener("message", async (evt: MessageEvent) => {
+  const data = evt.data;
+  if (!data || typeof data !== "object") return;
+  if (data.type === "warmup") {
+    try {
+      await initBaseNoMath();
+      if (data.mode === "heavy") {
+        await initEnhanced();
+      }
+    } catch {}
+    return;
+  }
+  if (data.type === "render") {
+    const { id, text } = data as { id: string; text: string };
+    try {
+      let html: string;
+      if (hasCodeFences(text) && !shikiLoaded) {
+        // Fast path without Shiki
+        const base = hasMath(text)
+          ? await initBaseWithMath()
+          : await initBaseNoMath();
+        html = String(await base.process(text || ""));
+      } else if (hasCodeFences(text)) {
+        const enhanced = await initEnhanced();
+        html = String(await enhanced.process(text || ""));
+      } else {
+        const base = hasMath(text)
+          ? await initBaseWithMath()
+          : await initBaseNoMath();
+        html = String(await base.process(text || ""));
+      }
+      (self as any).postMessage({ type: "result", id, html });
+    } catch (e: any) {
+      (self as any).postMessage({
+        type: "error",
+        id,
+        error: String(e?.message || e),
+      });
+    }
+  }
+});
 ````
 
 ## File: packages/app/public/robots.txt
@@ -3103,6 +4126,193 @@ Add an OpenRouter model catalog experience so users can search models, curate th
 - Persistence: localStorage + KV key `openrouter_selected_models`.
 ````
 
+## File: planning/perf-boot/design.md
+````markdown
+---
+artifact_id: e2b6dfe2-a19f-41a9-86df-4f0b7c3c4a8b
+---
+
+# design.md
+
+## Overview
+
+We will restructure the boot path so the interactive shell renders immediately and heavyweight features load behind the scenes. Key sources of startup cost from the repo:
+
+- Markdown pipeline (unified + rehype-shiki + katex) created at app mount via `processMarkdownChunk` warmup.
+- Global KaTeX CSS linked in `nuxt.config.ts` as render-blocking `<link rel="stylesheet">`.
+- wa-sqlite package (and potential OPFS setup) is marked for transpile and excluded from optimizeDeps, increasing cold-start bundling/parse.
+- Rich sidebar (icons, popovers, tooltips, store init) hydrates on first paint.
+
+## Architecture
+
+```mermaid
+flowchart TD
+  A[Initial HTML Shell] --> B[Minimal Hydration: Navbar + Input]
+  B -->|idle| C[Preload non-blocking CSS (KaTeX)]
+  B -->|user-visible| D[Lazy hydrate Sidebar + ThreadList]
+  B -->|first markdown| E[Dynamic import Markdown worker]
+  B -->|first DB use| F[Dynamic import wa-sqlite + DB worker]
+```
+
+### Core Changes
+
+1. Defer Markdown initialization
+
+- Replace synchronous `processMarkdownChunk` warmup in `app.vue` with lazy loader.
+- Wrap unified pipeline inside an on-demand module/worker created only when a message is rendered.
+- Use a small client component to stream markdown chunks and show plain text fallback until highlighter is ready.
+
+2. Non-blocking KaTeX
+
+- Swap render-blocking stylesheet with preload + media swap or programmatic injection on first math use.
+- Add `<link rel="preconnect" ...>` to CDN to reduce handshake cost.
+
+3. Progressive hydration for Sidebar/ThreadList
+
+- Wrap Sidebar and non-critical sections in `<ClientOnly>` or component-level `lazy-hydrate` pattern (Nuxt islands), hydrate on visibility or after first input.
+- Keep actionable minimal header controls interactive immediately.
+
+4. Optimize wa-sqlite imports
+
+- Ensure no eager import on boot; dynamic import in code paths that actually touch the DB.
+- Use a small DB facade that returns cached data for the first paint and backfills from the worker.
+
+5. Instrumentation
+
+- Add performance marks: `app_start` (plugin), `shell_painted` (after first paint), `first_click_ready` (nextTick in app shell), `heavy_deps_loaded` (after markdown + db workers ready).
+
+## Components and Interfaces
+
+### MarkdownService (lazy)
+
+```ts
+// contracts
+export interface MarkdownRenderRequest {
+  text: string;
+}
+export interface MarkdownRenderResponse {
+  html: string;
+}
+
+export interface MarkdownService {
+  ready(): Promise<void>;
+  render(text: string): Promise<string>;
+}
+```
+
+- Implementation: a thin async module that dynamically imports `unified`, `remark-*`, `rehype-*` and caches a processor instance. Optionally run in a Web Worker for large content.
+
+### DBFacade (lazy)
+
+```ts
+export interface DBFacade {
+  init(): Promise<void>; // idempotent
+  getThreadsPreview(): Promise<ThreadPreview[]>; // small, cached in memory/localStorage
+}
+```
+
+- Implementation: `import('wa-sqlite')` only when needed. On first load, use a cached serialized preview (localStorage) to render immediately; update asynchronously when DB is ready.
+
+## Data Models
+
+- No schema changes.
+- Add `localStorage` keys:
+  - `ui_threads_preview_v1`: serialized minimal thread metadata for instant sidebar render.
+  - `perf_boot_marks_v1`: last-session perf marks (for QA only; disabled in production builds if desired).
+
+## Error Handling
+
+- Lazy loaders must fail soft: fall back to plain text markdown and empty history placeholders.
+- If dynamic import fails, show toast once, debounce retries.
+
+## Testing Strategy
+
+- Unit
+  - MarkdownService lazy loader resolves and caches instance.
+  - DBFacade init is idempotent; preview caching works.
+- Integration
+  - App boots with shell interactive even if workers fail to load.
+  - Sidebar hydrates on visibility and updates with real data later.
+- E2E
+  - Measure first-input-delay and TTI with Lighthouse CI script; validate budgets.
+
+## Implementation Notes
+
+- Prefer `defineAsyncComponent` or dynamic import in setup blocks for heavy components.
+- Use `requestIdleCallback` with a `setTimeout` fallback for Safari.
+- Avoid adding global polyfills in `00-polyfills.client.ts` that increase bundle.
+````
+
+## File: planning/perf-boot/requirements.md
+````markdown
+---
+artifact_id: 5b6c2b7a-2b5c-4c8b-8b0f-4f4a2b7d9e12
+---
+
+# requirements.md
+
+## Introduction
+
+Goal: Make the app feel instant. Reduce time-to-interactive (TTI) from ~4s to sub-second on repeat visits and ≤1.5s p95 on cold loads by deferring heavy modules (Markdown/Shiki, wa-sqlite, workers), trimming render-blocking resources (KaTeX CSS), and adopting lazy hydration for non-critical UI.
+
+Scope: Frontend (Nuxt 3) boot path and first-interaction readiness. No visual or feature regressions.
+
+## User Roles
+
+- Visitor: lands on the app and expects immediate click/typing responsiveness.
+- Returning user: opens the app frequently and expects near-instant interactivity.
+
+## Functional Requirements
+
+1. Instant-feel initial render
+   - User Story: As a visitor, I want the shell to render and be clickable in under a second.
+   - Acceptance Criteria:
+     - WHEN the app loads on a typical desktop (M2, Safari/Chrome) THEN the first button click SHALL be responsive within 500–800ms on repeat visits and ≤1.5s p95 on cold loads.
+     - Core controls (New Chat, Model dropdown placeholder, input box) SHALL be operable immediately, even if background features are still loading.
+
+2. Lazy-load heavy subsystems
+   - User Story: As a visitor, I want non-essential code to load after I can interact.
+   - Acceptance Criteria:
+     - Markdown rendering pipeline (unified + rehype-shiki + katex) SHALL not be initialized during page mount; it SHALL be loaded on demand (first markdown render) or in an idle task.
+     - wa-sqlite and any OPFS/DB worker SHALL not block first interaction; it SHALL initialize lazily when the sidebar/threads need it or via requestIdleCallback.
+     - Web workers (markdown/db) SHALL be created only when first used.
+
+3. Remove render-blocking resources
+   - User Story: As a visitor, I don’t want third-party CSS/JS to delay interactivity.
+   - Acceptance Criteria:
+     - KaTeX stylesheet SHALL not block initial paint; it SHALL be preconnected and loaded with a non-blocking strategy (preload + apply, media swap, or on-demand injection).
+     - Fonts SHALL not block interactivity; default system fonts acceptable during FOUT.
+
+4. Progressive UI hydration
+   - User Story: As a visitor, I want the above-the-fold shell to hydrate fast while secondary widgets hydrate later.
+   - Acceptance Criteria:
+     - Sidebar, thread list, and settings modal content SHALL be lazily hydrated (when visible or after first input).
+     - Expensive icon packs/badges SHALL be lazy where feasible.
+
+5. Performance instrumentation and budgets
+   - User Story: As a developer, I want hard numbers and guardrails.
+   - Acceptance Criteria:
+     - The app SHALL emit Performance Marks for: app_start, shell_painted, first_click_ready, heavy_deps_loaded.
+     - A lighthouse/Pagespeed budget SHALL be defined: TTI ≤ 1500ms p95 cold, JS < 250KB (gz) on landing route, main thread blocking time < 200ms p95.
+
+6. No regressions in features or accessibility
+   - User Story: As a user, I want the same functionality.
+   - Acceptance Criteria:
+     - All chat features (streaming, reasoning, model selection) SHALL work unchanged.
+     - A11y: keyboard and ARIA behaviors SHALL remain intact for moved/lazy components.
+
+## Non-Functional Requirements
+
+- Reliability: Lazy modules must handle rapid user actions and offline gracefully.
+- Security: No change to auth; do not expose secrets in performance logs.
+- Compatibility: Works on evergreen browsers; degrades gracefully on older Safari (no hard reliance on requestIdleCallback without fallback).
+
+## Integration Requirements
+
+- Nuxt 3 build/runtime only; no backend changes required for boot perf.
+- Keep existing @nuxt/ui and @vueuse; avoid global polyfills that increase bundle.
+````
+
 ## File: .prettierrc.json
 ````json
 {}
@@ -3734,81 +4944,6 @@ const obj = computed(() => {
 </script>
 ````
 
-## File: packages/app/app/components/AssistantMessage.vue
-````vue
-<template>
-  <div>
-    <Reasoning class="mb-2" v-if="reasoning?.length" :content="reasoning" />
-    <div class="flex flex-col">
-      <VueSpinnerDots
-        v-if="message.stream_id && !reasoning?.length && !content?.length"
-        class="w-10"
-      />
-      <MarkdownRenderer :content="content" :chunked="!!message.stream_id" />
-      <AssistantErrorMessage
-        :error="message.error"
-        v-if="!message.stream_id && message.error"
-      />
-    </div>
-    <WebSearch v-if="message.webSearch" :content="message.webSearch" />
-  </div>
-</template>
-
-<script setup lang="ts">
-import { VueSpinnerDots } from "vue3-spinners";
-
-const { message } = defineProps<{ message: any }>();
-const content = computed(() =>
-  message.stream_id ? streamContent.value : message.data?.content,
-);
-const reasoning = computed(() =>
-  message.stream_id ? streamReasoning.value : message.data?.reasoning,
-);
-const streamContent = ref("");
-const streamReasoning = ref("");
-const config = useRuntimeConfig();
-
-// TODO: make sure each http call is only made once for a tab
-async function fetchStream(streamId: string, streamRef: Ref) {
-  try {
-    const streamUrl = `${config.public.apiUrl}/stream/${streamId}`;
-    const response = await fetch(streamUrl);
-    if (!response.ok) {
-      throw new Error(`Stream error: ${response.status}`);
-    }
-    const reader = response.body?.getReader();
-    if (!reader) return;
-    const decoder = new TextDecoder();
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) {
-        break;
-      }
-      const chunk = decoder.decode(value, { stream: true });
-      streamRef.value += chunk;
-    }
-  } catch (error) {
-    console.error("Error streaming message:", error);
-  }
-}
-
-watch(
-  () => message.stream_id,
-  (streamId) => {
-    if (streamId) {
-      streamReasoning.value = "";
-      streamContent.value = "";
-      fetchStream(streamId, streamContent);
-      fetchStream(streamId + "?reasoning=true", streamReasoning);
-    }
-  },
-  {
-    immediate: true,
-  },
-);
-</script>
-````
-
 ## File: packages/app/app/composables/useOpenRouterAuth.ts
 ````typescript
 import { ref } from "vue";
@@ -3935,6 +5070,250 @@ export function useOpenRouterAuth() {
 }
 ````
 
+## File: packages/app/app/composables/useRenderGate.ts
+````typescript
+// A tiny global gate to coordinate when each message's content is fully ready
+// Usage: const { isReady, markReady, reset } = useRenderGate()
+
+export function useRenderGate() {
+  const state = useState<Record<string, boolean>>("render-gate", () => ({}));
+
+  function markReady(id: string) {
+    if (!id) return;
+    state.value[id] = true;
+  }
+
+  function reset(id: string) {
+    if (!id) return;
+    state.value[id] = false;
+  }
+
+  function isReady(id: string | undefined | null) {
+    if (!id) return false;
+    return !!state.value[id];
+  }
+
+  return { isReady, markReady, reset };
+}
+````
+
+## File: packages/app/app/plugins/markdown-warmup.client.ts
+````typescript
+export default defineNuxtPlugin(() => {
+  if (typeof window === "undefined") return;
+  // Kick off base warmup right after app boot
+  queueMicrotask(async () => {
+    try {
+      const { warmupMarkdown } = await import("~/utils/markdown-lazy");
+      // Base immediately; heavy on idle to avoid contention
+      warmupMarkdown("base");
+      const scheduleIdle = (cb: () => void) =>
+        (window as any).requestIdleCallback
+          ? (window as any).requestIdleCallback(cb, { timeout: 1500 })
+          : setTimeout(cb, 500);
+      scheduleIdle(() => warmupMarkdown("heavy"));
+    } catch {}
+  });
+});
+````
+
+## File: packages/app/app/plugins/perf.client.ts
+````typescript
+export default defineNuxtPlugin((nuxtApp) => {
+  // app_start: as soon as the client plugin runs
+  try {
+    performance.mark("app_start");
+  } catch {}
+
+  const state = {
+    ready: false,
+    firstInteractionMarked: false,
+    heavyMarked: false,
+  };
+
+  // shell_painted: next microtask + next frame after plugin init
+  // approximates "after mount/nextTick" without component hooks
+  try {
+    queueMicrotask(() => {
+      requestAnimationFrame(() => {
+        performance.mark("shell_painted");
+        state.ready = true;
+      });
+    });
+  } catch {
+    // Fallback if queueMicrotask is not available
+    setTimeout(() => {
+      try {
+        performance.mark("shell_painted");
+        state.ready = true;
+      } catch {}
+    }, 0);
+  }
+
+  // first_click_ready: first user interaction AFTER we consider the shell painted/ready
+  const markFirstInteraction = () => {
+    if (!state.ready || state.firstInteractionMarked) return;
+    state.firstInteractionMarked = true;
+    try {
+      performance.mark("first_click_ready");
+    } catch {}
+    cleanupInteractionListeners();
+  };
+
+  const cleanupInteractionListeners = () => {
+    window.removeEventListener("pointerdown", markFirstInteraction, true);
+    window.removeEventListener("keydown", markFirstInteraction, true);
+    window.removeEventListener("click", markFirstInteraction, true);
+  };
+
+  window.addEventListener("pointerdown", markFirstInteraction, true);
+  window.addEventListener("keydown", markFirstInteraction, true);
+  window.addEventListener("click", markFirstInteraction, true);
+
+  // heavy_deps_loaded: expose both an API and an event for external callers
+  let devReport: (() => void) | undefined;
+
+  const markHeavy = () => {
+    if (state.heavyMarked) return;
+    state.heavyMarked = true;
+    try {
+      performance.mark("heavy_deps_loaded");
+    } catch {}
+    if (import.meta.dev) devReport?.();
+  };
+
+  nuxtApp.provide("perf", {
+    markHeavyDepsLoaded: markHeavy,
+    mark: (name: string) => {
+      try {
+        performance.mark(name);
+      } catch {}
+    },
+  });
+
+  window.addEventListener("perf:heavy_deps_loaded", markHeavy, { once: true });
+
+  // Dev-only console reporter
+  if (import.meta.dev) {
+    const BUDGETS = {
+      shellPaintedMs: 1500,
+      heavyReadyMs: 3000,
+      previewCacheReadMs: 15,
+      previewRefreshMs: 120,
+      dbWorkerReadyMs: 800,
+    };
+
+    const getMark = (name: string) =>
+      performance.getEntriesByName(name).at(-1) as PerformanceMark | undefined;
+
+    const measureDelta = (start: string, end: string) => {
+      const a = getMark(start);
+      const b = getMark(end);
+      return a && b ? Math.round(b.startTime - a.startTime) : undefined;
+    };
+
+    const report = () => {
+      const appStart = getMark("app_start");
+      const shell = getMark("shell_painted");
+      const firstReady = getMark("first_click_ready");
+      const heavy = getMark("heavy_deps_loaded");
+      const cacheRead = getMark("preview_cache_read");
+      const dbReady = getMark("db_worker_ready");
+      const refreshDone = getMark("preview_refresh_done");
+
+      const fromOrigin = (m?: PerformanceMark) =>
+        m ? Math.round(m.startTime) : undefined;
+
+      const dShell = measureDelta("app_start", "shell_painted");
+      const dFirst = measureDelta("app_start", "first_click_ready");
+      const dHeavy = measureDelta("app_start", "heavy_deps_loaded");
+      const dCache = measureDelta("app_start", "preview_cache_read");
+      const dDbReady = measureDelta("app_start", "db_worker_ready");
+      const dRefresh = measureDelta("app_start", "preview_refresh_done");
+
+      // eslint-disable-next-line no-console
+      console.groupCollapsed("%cPerf marks", "color:#06f");
+      // eslint-disable-next-line no-console
+      console.table([
+        { mark: "app_start", t_ms: fromOrigin(appStart) },
+        {
+          mark: "shell_painted",
+          t_ms: fromOrigin(shell),
+          delta_from_start_ms: dShell,
+        },
+        {
+          mark: "first_click_ready",
+          t_ms: fromOrigin(firstReady),
+          delta_from_start_ms: dFirst,
+        },
+        {
+          mark: "heavy_deps_loaded",
+          t_ms: fromOrigin(heavy),
+          delta_from_start_ms: dHeavy,
+        },
+        {
+          mark: "preview_cache_read",
+          t_ms: fromOrigin(cacheRead),
+          delta_from_start_ms: dCache,
+        },
+        {
+          mark: "db_worker_ready",
+          t_ms: fromOrigin(dbReady),
+          delta_from_start_ms: dDbReady,
+        },
+        {
+          mark: "preview_refresh_done",
+          t_ms: fromOrigin(refreshDone),
+          delta_from_start_ms: dRefresh,
+        },
+      ]);
+      // eslint-disable-next-line no-console
+      console.groupEnd();
+
+      if (typeof dShell === "number" && dShell > BUDGETS.shellPaintedMs) {
+        console.warn(
+          `[perf] shell_painted over budget: ${dShell}ms > ${BUDGETS.shellPaintedMs}ms`,
+        );
+      }
+      if (typeof dHeavy === "number" && dHeavy > BUDGETS.heavyReadyMs) {
+        console.warn(
+          `[perf] heavy_deps_loaded over budget: ${dHeavy}ms > ${BUDGETS.heavyReadyMs}ms`,
+        );
+      }
+      if (typeof dCache === "number" && dCache > BUDGETS.previewCacheReadMs) {
+        console.warn(
+          `[perf] preview_cache_read over budget: ${dCache}ms > ${BUDGETS.previewCacheReadMs}ms`,
+        );
+      }
+      if (typeof dDbReady === "number" && dDbReady > BUDGETS.dbWorkerReadyMs) {
+        console.warn(
+          `[perf] db_worker_ready over budget: ${dDbReady}ms > ${BUDGETS.dbWorkerReadyMs}ms`,
+        );
+      }
+      if (typeof dRefresh === "number" && dRefresh > BUDGETS.previewRefreshMs) {
+        console.warn(
+          `[perf] preview_refresh_done over budget: ${dRefresh}ms > ${BUDGETS.previewRefreshMs}ms`,
+        );
+      }
+    };
+
+    // expose to outer scope for markHeavy()
+    devReport = report;
+
+    // Fallback: print a report after 5s even if heavy mark never occurs
+    setTimeout(report, 5000);
+
+    // Also log once hydration is deemed ready
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        // small debounce
+        setTimeout(report, 300);
+      }
+    });
+  }
+});
+````
+
 ## File: packages/app/app/utils/markdown.ts
 ````typescript
 import rehypeShiki from "@shikijs/rehype";
@@ -4031,22 +5410,6 @@ export default defineAppConfig({
     },
   },
 });
-````
-
-## File: packages/app/app/app.vue
-````vue
-<template>
-  <UApp>
-    <NuxtLayout> <NuxtPage /> </NuxtLayout
-  ></UApp>
-</template>
-
-<script setup lang="ts">
-onMounted(() => {
-  // warm up markdown processor
-  processMarkdownChunk("# test");
-});
-</script>
 ````
 
 ## File: planning/openrouter-chat/tasks.md
@@ -4389,28 +5752,6 @@ const confirmDelete = () => {
 </script>
 ````
 
-## File: packages/app/app/components/MarkdownChunkRenderer.client.vue
-````vue
-<template>
-  <div v-html="html" />
-</template>
-
-<script setup lang="ts">
-const { block } = defineProps<{ block: string }>();
-const html = ref(block);
-
-watch(
-  [() => block],
-  async () => {
-    if (block) {
-      html.value = await processMarkdownChunk(block);
-    }
-  },
-  { immediate: true },
-);
-</script>
-````
-
 ## File: packages/app/app/components/ReasoningBudget.vue
 ````vue
 <template>
@@ -4610,6 +5951,215 @@ const onSelect = (item: any) => {
 //   },
 // });
 </script>
+````
+
+## File: packages/app/app/composables/useThreadsPreview.ts
+````typescript
+import { ref, shallowRef } from "vue";
+import { useNuxtApp } from "#app";
+import {
+  PreviewCache,
+  PREVIEW_CACHE_VERSION,
+  versionKeyFor,
+  type PreviewEnvelope,
+  type ThreadPreview,
+} from "../utils/preview-cache";
+
+// Singleton state to ensure one source of truth across imports
+const items = shallowRef<ThreadPreview[]>([]);
+const ready = ref(false);
+const isStale = ref(false);
+let initialized = false;
+let refreshing: Promise<void> | null = null;
+
+const versionKey = versionKeyFor(PREVIEW_CACHE_VERSION);
+
+function mark(name: string) {
+  try {
+    // Prefer perf plugin if available (centralized reporting/budgets)
+    const nuxt = useNuxtApp();
+    const perf = nuxt.$perf as { mark?: (n: string) => void } | undefined;
+    if (perf && typeof perf.mark === "function") {
+      perf.mark(name);
+      return;
+    }
+  } catch {
+    // fall through to performance API
+  }
+  try {
+    if (typeof performance !== "undefined" && performance.mark) {
+      performance.mark(name);
+    }
+  } catch {
+    /* no-op */
+  }
+}
+
+function sanitizeSnippet(s: string): string {
+  if (!s) return "";
+  // cheap sanitize: collapse whitespace and strip code fences/markdown symbols
+  return String(s)
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+async function readCacheOnce() {
+  const start = import.meta.dev ? performance.now() : 0;
+  const envelope = await PreviewCache.get(versionKey);
+  if (envelope && Array.isArray(envelope.items)) {
+    items.value = envelope.items;
+  } else {
+    items.value = [];
+  }
+  mark("preview_cache_read");
+  if (import.meta.dev) {
+    // eslint-disable-next-line no-console
+    console.debug(
+      "[threads-preview] cache read in",
+      (performance.now() - start).toFixed(1),
+      "ms; items:",
+      items.value.length,
+    );
+  }
+  ready.value = true;
+}
+
+async function doRefresh(force = false) {
+  if (refreshing && !force) return refreshing;
+  refreshing = (async () => {
+    const t0 = import.meta.dev ? performance.now() : 0;
+    isStale.value = true;
+    try {
+      // Ensure DB warms up off critical path (nuxt-workers global)
+      await initDatabase();
+      // Mirror a readiness mark on the client timeline for centralized reporting
+      mark("db_worker_ready");
+      // Query directly via dbExec to avoid export mismatch issues
+      const sql = `
+        SELECT
+          t.id,
+          t.title,
+          t.updated_at,
+          t.last_message_at,
+          t.pinned,
+          t.deleted,
+          SUBSTR(COALESCE((
+            SELECT m2.content
+            FROM messages m2
+            WHERE m2.thread_id = t.id AND m2.deleted = 0
+            ORDER BY m2.created_at DESC, m2.message_index DESC
+            LIMIT 1
+          ), ''), 1, 140) AS last_message_snippet,
+          (
+            SELECT COUNT(1)
+            FROM messages m3
+            WHERE m3.thread_id = t.id AND m3.deleted = 0
+          ) AS message_count
+        FROM threads t
+        WHERE t.deleted = 0
+        ORDER BY t.pinned DESC, t.last_message_at DESC, t.updated_at DESC;
+      `;
+      const res = await dbExec({ sql, bindings: null as any });
+      const previews: ThreadPreview[] = (res.rows || []).map((row: any[]) => {
+        const [
+          id,
+          title,
+          updated_at,
+          last_message_at,
+          pinned,
+          deleted,
+          last_message_snippet,
+          message_count,
+        ] = row;
+        return {
+          id: String(id),
+          title: String(title ?? ""),
+          updated_at: Number(updated_at ?? 0),
+          last_message_at: Number(last_message_at ?? 0),
+          pinned: Number(pinned ?? 0) as 0 | 1,
+          deleted: Number(deleted ?? 0) as 0 | 1,
+          last_message_snippet: String(last_message_snippet ?? ""),
+          message_count: Number(message_count ?? 0),
+        } as ThreadPreview;
+      });
+      const mapped: ThreadPreview[] = previews.map((p) => ({
+        ...p,
+        last_message_snippet: sanitizeSnippet(p.last_message_snippet || ""),
+      }));
+
+      const envelope: PreviewEnvelope = {
+        version: PREVIEW_CACHE_VERSION,
+        generated_at: Date.now(),
+        items: mapped,
+      };
+
+      await PreviewCache.set(versionKey, envelope);
+      // Atomic swap
+      items.value = mapped;
+      mark("preview_refresh_done");
+      if (import.meta.dev) {
+        // eslint-disable-next-line no-console
+        console.debug(
+          "[threads-preview] refresh done in",
+          (performance.now() - t0).toFixed(1),
+          "ms; items:",
+          items.value.length,
+        );
+      }
+    } catch (err) {
+      if (import.meta.dev) {
+        // eslint-disable-next-line no-console
+        console.warn("[threads-preview] refresh failed", err);
+      }
+      // Keep stale data; optional retry can be scheduled by caller
+    } finally {
+      isStale.value = false;
+      refreshing = null;
+    }
+  })();
+  return refreshing;
+}
+
+async function invalidateAll() {
+  await PreviewCache.clearAll();
+  return doRefresh(true);
+}
+
+export function useThreadsPreview() {
+  if (!initialized) {
+    initialized = true;
+    // First touch: load cache immediately and kick refresh
+    // Fire and forget; callers can await ready/isStale as needed
+    readCacheOnce();
+    doRefresh(false);
+  }
+
+  return {
+    items,
+    isStale,
+    ready,
+    refresh: (opts?: { force?: boolean }) => doRefresh(!!opts?.force),
+    invalidateAll,
+    // Best-effort patch: updates an item locally without forcing a full refresh
+    upsertPreview: (partial: Partial<ThreadPreview> & { id: string }) => {
+      const idx = items.value.findIndex((t) => t.id === partial.id);
+      if (idx >= 0) {
+        const merged = { ...items.value[idx], ...partial } as ThreadPreview;
+        const next = items.value.slice();
+        next[idx] = merged;
+        // resort if time fields or pinned changed
+        next.sort(
+          (a, b) =>
+            (b.pinned as number) - (a.pinned as number) ||
+            (b.last_message_at || 0) - (a.last_message_at || 0) ||
+            (b.updated_at || 0) - (a.updated_at || 0),
+        );
+        items.value = next;
+      }
+    },
+  };
+}
 ````
 
 ## File: packages/app/app/layouts/chat.vue
@@ -5026,6 +6576,19 @@ onMounted(async () => {
 </script>
 ````
 
+## File: packages/app/app/app.vue
+````vue
+<template>
+  <UApp>
+    <NuxtLayout> <NuxtPage /> </NuxtLayout
+  ></UApp>
+</template>
+
+<script setup lang="ts">
+// No warmup; markdown stack loads on demand via utils/markdown-lazy
+</script>
+````
+
 ## File: .env.example
 ````
 ALCHEMY_PASSWORD=please_change_this_to_a_random_string
@@ -5073,6 +6636,138 @@ logs
 wrangler.jsonc
 ````
 
+## File: packages/app/app/components/AssistantMessage.vue
+````vue
+<template>
+  <div>
+    <Reasoning
+      class="mb-2"
+      v-if="reasoning?.length && contentReady"
+      :content="reasoning"
+    />
+    <div class="flex flex-col">
+      <VueSpinnerDots
+        v-if="message.stream_id && !reasoning?.length && !content?.length"
+        class="w-10"
+      />
+      <MarkdownRenderer
+        :content="content"
+        :chunked="!!message.stream_id"
+        variant="assistant"
+        @rendered="onRendered"
+      />
+      <AssistantErrorMessage
+        :error="message.error"
+        v-if="!message.stream_id && message.error"
+      />
+    </div>
+    <WebSearch v-if="message.webSearch" :content="message.webSearch" />
+  </div>
+</template>
+
+<script setup lang="ts">
+import { VueSpinnerDots } from "vue3-spinners";
+
+const { message } = defineProps<{ message: any }>();
+const content = computed(() =>
+  message.stream_id ? streamContent.value : message.data?.content,
+);
+const reasoning = computed(() =>
+  message.stream_id ? streamReasoning.value : message.data?.reasoning,
+);
+const streamContent = ref("");
+const streamReasoning = ref("");
+const { isReady, markReady, reset } = useRenderGate();
+const contentReady = computed(() => isReady(message.id));
+const onRendered = () => {
+  markReady(message.id);
+};
+const config = useRuntimeConfig();
+
+// TODO: make sure each http call is only made once for a tab
+async function fetchStream(streamId: string, streamRef: Ref) {
+  try {
+    const streamUrl = `${config.public.apiUrl}/stream/${streamId}`;
+    const response = await fetch(streamUrl);
+    if (!response.ok) {
+      throw new Error(`Stream error: ${response.status}`);
+    }
+    const reader = response.body?.getReader();
+    if (!reader) return;
+    const decoder = new TextDecoder();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+      const chunk = decoder.decode(value, { stream: true });
+      streamRef.value += chunk;
+    }
+  } catch (error) {
+    console.error("Error streaming message:", error);
+  }
+}
+
+watch(
+  () => message.stream_id,
+  (streamId) => {
+    if (streamId) {
+      reset(message.id);
+      streamReasoning.value = "";
+      streamContent.value = "";
+      fetchStream(streamId, streamContent);
+      fetchStream(streamId + "?reasoning=true", streamReasoning);
+    }
+  },
+  {
+    immediate: true,
+  },
+);
+</script>
+````
+
+## File: packages/app/app/components/MarkdownChunkRenderer.client.vue
+````vue
+<template>
+  <div>
+    <div v-if="!ready" class="py-2">
+      <MarkdownSkeleton :variant="variant" />
+    </div>
+    <div v-else v-html="html" />
+  </div>
+</template>
+
+<script setup lang="ts">
+const { block, variant } = withDefaults(
+  defineProps<{ block: string; variant?: "user" | "assistant" }>(),
+  { variant: "assistant" },
+);
+const emit = defineEmits(["ready"]);
+const html = ref("");
+const ready = ref(false);
+// Lazy renderer
+const { renderMarkdownChunk } = await import("~/utils/markdown-lazy");
+
+watch(
+  [() => block],
+  async () => {
+    if (block) {
+      ready.value = false;
+      html.value = await renderMarkdownChunk(block);
+      ready.value = true;
+      emit("ready");
+    }
+  },
+  { immediate: true },
+);
+</script>
+<script lang="ts">
+export default {
+  components: { MarkdownSkeleton: () => import("./MarkdownSkeleton.vue") },
+};
+</script>
+````
+
 ## File: packages/app/app/components/Reasoning.vue
 ````vue
 <template>
@@ -5113,6 +6808,63 @@ onMounted(() => {
   processMarkdownChunk(content);
 });
 </script>
+````
+
+## File: planning/perf-boot/tasks.md
+````markdown
+---
+artifact_id: 0b2f7c3a-7c10-4c3a-9c9b-7b1a3c3d6c42
+---
+
+# tasks.md
+
+## 1. Instrument boot and define budgets
+
+- [x] Add client plugin `plugins/perf.client.ts` with performance marks: app_start (immediate), shell_painted (after mount/nextTick), first_click_ready (set after first interaction hook), heavy_deps_loaded (after markdown/db workers ready). Requirements: 5.
+- [x] Add a simple console reporter in dev only. Requirements: 5.
+- [x] Create docs snippet in README for interpreting marks. Requirements: 5.
+
+## 2. Remove render-blocking KaTeX CSS
+
+- [x] Replace nuxt.config.ts head.link stylesheet with: preconnect + preload + on-demand injection script, or media="print" swap technique. Requirements: 3.
+- [x] Verify math renders post-load in AssistantMessage markdown flow. Requirements: 6.
+
+## 3. Defer Markdown pipeline
+
+- [x] Delete warmup call in `app/app.vue` that calls `processMarkdownChunk("# test")`. Requirements: 2.
+- [x] Create `utils/markdown-lazy.ts` that dynamically imports unified stack; export `render()` with internal singleton. Requirements: 2.
+- [x] Update `MarkdownRenderer.vue` and `MarkdownChunkRenderer.client.vue` (if present) to call lazy renderer; show plain text fallback until ready. Requirements: 1,2,6.
+- [x] Optional: move to a Web Worker if chunk size > threshold (phase 2). Requirements: 2.
+
+## 4. Progressive hydration of Sidebar/ThreadList
+
+- [ ] Wrap `Sidebar.vue` in a lightweight shell that renders header + New Chat instantly; lazy-load the thread lists using `defineAsyncComponent` or `ClientOnly` with `when-visible` sentinel. Requirements: 1,4.
+- [x] Defer expensive icon sets and popovers until hover/focus (use dynamic import for popover content). Requirements: 4.
+
+## 5. Lazy wa-sqlite/db initialization
+
+- [x] Create `utils/db-facade.ts` to gate dynamic import('wa-sqlite'); export `init()` and `getThreadsPreview()` returning cached preview from localStorage on first call. Requirements: 2.
+- [x] Hydrate preview cache whenever sidebar successfully loads threads; write to localStorage for future fast boots. Requirements: 2.
+
+## 6. Vite/Nuxt build tuning
+
+- [ ] Re-evaluate `transpile`/`optimizeDeps` for wa-sqlite and estree-walker to minimize dev-time bundling overhead; only transpile if necessary. Requirements: 1,2.
+- [ ] Enable route-level code splitting where possible (ensure pages/[[id]].vue is standalone). Requirements: 1.
+
+## 7. QA and perf verification
+
+- [ ] Add a minimal Lighthouse CI script or manual instructions to measure TTI/FCP/BTI locally. Requirements: 5.
+- [ ] Validate p95 budgets on cold and warm loads; capture numbers in a short perf report in PR. Requirements: 1,5.
+
+## 8. Safeguards and regressions
+
+- [ ] Add unit tests for lazy loaders; smoke test markdown with math and code blocks. Requirements: 6.
+- [ ] Add fallback for `requestIdleCallback` using `setTimeout`. Requirements: 2.
+
+## Notes / Phase 2 (optional)
+
+- Worker-ize markdown processing for long documents, and stream tokens directly into renderer.
+- Cache KaTeX CSS integrity-verified locally and ship with app to remove third-party fetch.
 ````
 
 ## File: package.json
@@ -5535,287 +7287,6 @@ const toggleWebSearch = () => {
 </script>
 ````
 
-## File: packages/app/app/components/ChatThread.vue
-````vue
-<template>
-  <div v-for="(threads, category) in threads" :key="category" class="space-y-1">
-    <h3
-      class="mb-2 flex items-center gap-1 text-xs uppercase font-semibold tracking-wide"
-      :class="[
-        category.toLowerCase() === 'pinned'
-          ? 'text-primary-600/80 dark:text-primary-400/80'
-          : 'text-neutral-700 dark:text-neutral-300',
-      ]"
-    >
-      <UIcon
-        v-if="category.toLowerCase() === 'pinned'"
-        name="i-codicon:pinned"
-        class="size-3.5"
-      />
-      {{ category }}
-    </h3>
-    <div
-      v-for="thread in threads"
-      :key="thread.id"
-      @click="switchThread(thread)"
-      class="p-1.5 rounded-lg hover:bg-white dark:hover:bg-neutral-800 cursor-pointer group overflow-hidden"
-      :class="[
-        popperThreadId === thread.id || activeThread === thread.id
-          ? 'bg-white dark:bg-neutral-800'
-          : '',
-      ]"
-    >
-      <div class="flex justify-start gap-2 items-center relative">
-        <UIcon
-          v-if="thread.parent_thread_id"
-          name="i-carbon:branch"
-          class="size-3.5"
-        />
-        <UTooltip
-          v-if="editableThreadId != thread.id"
-          :text="thread.title"
-          :disableHoverableContent="true"
-        >
-          <span
-            class="text-sm font-medium text-neutral-500 dark:text-neutral-400 truncate"
-            @dblclick="editThread(thread)"
-          >
-            {{ thread.title }}
-          </span>
-        </UTooltip>
-        <UInput
-          v-if="editableThreadId === thread.id"
-          :id="`thread-input-${thread.id}`"
-          v-model="thread.title"
-          class="w-full"
-          :ui="{
-            base: 'truncate p-0 pb-0.5 ring-0 focus-visible:ring-0 border-b border-b-neutral-600/50 rounded-none bg-transparent',
-          }"
-          @blur="saveThread(thread)"
-          @keydown.enter="saveThread(thread)"
-        />
-
-        <div
-          @click.stop
-          class="h-full absolute right-0 pl-3 pr-0.5 gap-1 flex items-center group-hover:translate-x-1 rounded-lg transition-transform duration-100 bg-[linear-gradient(to_right,_transparent_0%,_white_20%,_white_100%)] dark:bg-[linear-gradient(to_right,_transparent_0%,_#262626_20%,_#262626_100%)]"
-          :class="[
-            popperThreadId === thread.id
-              ? 'transform translate-x-1'
-              : 'transform translate-x-[120%]',
-          ]"
-        >
-          <UTooltip
-            :disableHoverableContent="true"
-            :text="pinned ? unpinnedAction.tooltip : pinnedAction.tooltip"
-          >
-            <UButton
-              :icon="pinned ? unpinnedAction.icon : pinnedAction.icon"
-              variant="ghost"
-              color="neutral"
-              size="xs"
-              class="dark:hover:bg-neutral-700/70 rounded-md flex items-center"
-              @click="
-                pinned
-                  ? unpinnedAction.action(thread.id)
-                  : pinnedAction.action(thread.id)
-              "
-            />
-          </UTooltip>
-
-          <UPopover
-            @update:open="
-              (isOpen: boolean) => (popperThreadId = isOpen ? thread.id : null)
-            "
-            :open="popperThreadId === thread.id"
-          >
-            <UButton
-              :icon="moreOptionsAction.icon"
-              variant="ghost"
-              color="neutral"
-              size="xs"
-              :title="popperThreadId"
-              class="dark:hover:bg-neutral-700/70 rounded-md flex items-center"
-              :class="[
-                popperThreadId === thread.id ? 'dark:bg-neutral-700/70' : '',
-              ]"
-            />
-            <template #content>
-              <div class="p-1 bg-white dark:bg-black rounded-lg min-w-35">
-                <div
-                  v-for="moreAction in moreActions"
-                  :key="moreAction.icon"
-                  class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800/70 font-semibold rounded cursor-pointer"
-                  @click="moreAction.action(thread)"
-                >
-                  <UIcon :name="moreAction.icon" class="size-4" />
-                  <span>{{ moreAction.name }}</span>
-                </div>
-              </div>
-            </template>
-          </UPopover>
-        </div>
-      </div>
-    </div>
-  </div>
-
-  <DeleteModal
-    v-model="openDeleteModal"
-    :thread="threadToDelete"
-    @cancelDelete="cancelDelete"
-    @confirmDelete="confirmDelete"
-  />
-</template>
-
-<script setup lang="ts">
-const props = defineProps({
-  threads: {
-    type: Object,
-    default: () => {},
-  },
-  pinned: {
-    type: Boolean,
-    default: false,
-  },
-});
-const threadsStore = useThreadsStore();
-const popperThreadId = ref<number | null>(null);
-const { activeThread } = storeToRefs(threadsStore);
-const { $sync } = useNuxtApp();
-
-function switchThread(thread: any) {
-  navigateTo(`/${thread.id}`);
-}
-
-const editableThreadId = ref<number | null>(null);
-const editThread = (thread: any) => {
-  editableThreadId.value = thread.id;
-  requestAnimationFrame(() => {
-    const input = document.getElementById(`thread-input-${thread.id}`);
-    input?.focus();
-  });
-};
-
-const saveThread = (thread: any) => {
-  editableThreadId.value = null;
-  $sync.updateThread(thread.id, { title: thread.title });
-};
-
-const pinnedAction = ref({
-  icon: "i-codicon:pinned",
-  tooltip: "Pin Thread",
-  action: (id: string) => {
-    useNuxtApp().$sync.updateThread(id, { pinned: true });
-  },
-});
-
-const unpinnedAction = ref({
-  icon: "i-mdi-light:pin-off",
-  tooltip: "Unpin Thread",
-  action: (id: string) => {
-    useNuxtApp().$sync.updateThread(id, { pinned: false });
-  },
-});
-
-const moreOptionsAction = ref({
-  icon: "heroicons:ellipsis-horizontal-solid",
-  tooltip: "More options",
-});
-
-const openDeleteModal = ref(false);
-const threadToDelete = ref<any>(null);
-
-const moreActions = ref([
-  {
-    icon: props.pinned ? unpinnedAction.value.icon : pinnedAction.value.icon,
-    name: props.pinned ? "Unpin" : "Pin",
-    action: (thread: any) => {
-      if (props.pinned) {
-        unpinnedAction.value.action(thread.id);
-      } else {
-        pinnedAction.value.action(thread.id);
-      }
-    },
-  },
-  {
-    icon: "heroicons:pencil-square",
-    name: "Rename",
-    action: (thread) => {
-      editThread(thread);
-    },
-  },
-  {
-    icon: "heroicons:trash",
-    name: "Delete",
-    action: (thread) => {
-      popperThreadId.value = null;
-      threadToDelete.value = thread;
-      openDeleteModal.value = true;
-    },
-  },
-  {
-    icon: "heroicons:arrow-down-tray-20-solid",
-    name: "Export",
-    action: () => {
-      // Implement action to edit message
-    },
-  },
-]);
-
-const cancelDelete = () => {
-  openDeleteModal.value = false;
-  threadToDelete.value = null;
-};
-
-const confirmDelete = () => {
-  useNuxtApp().$sync.updateThread(threadToDelete.value?.id, { deleted: true });
-  openDeleteModal.value = false;
-  threadToDelete.value = null;
-};
-</script>
-
-<style scoped>
-.gradient-bg-light {
-  background: linear-gradient(to right, transparent 0%, #fff 20%, #fff 100%);
-}
-
-.gradient-bg-dark {
-  background: linear-gradient(
-    to right,
-    transparent 0%,
-    #262626 20%,
-    #262626 100%
-  );
-}
-</style>
-````
-
-## File: packages/app/app/components/MarkdownRenderer.vue
-````vue
-<template>
-  <div
-    class="prose dark:prose-invert [&>div:last-child>p:last-child]:mb-0 [&>div:first-child>p:first-child]:mt-0 overflow-x-auto"
-  >
-    <MarkdownChunkRenderer
-      v-for="(b, index) in blocks"
-      :key="index"
-      :block="b"
-    />
-  </div>
-</template>
-
-<script setup lang="ts">
-import { marked } from "marked";
-
-const { content, chunked } = defineProps<{
-  content: string;
-  chunked?: boolean;
-}>();
-const blocks = computed(() =>
-  chunked ? marked.lexer(content || "").map((block) => block.raw) : [content],
-);
-</script>
-````
-
 ## File: packages/app/app/composables/useModelStore.ts
 ````typescript
 import modelsService, {
@@ -6109,6 +7580,250 @@ export const useModelStore = defineStore("model", () => {
     loadSelection,
   };
 });
+````
+
+## File: packages/app/app/components/ChatThread.vue
+````vue
+<template>
+  <div v-for="(threads, category) in threads" :key="category" class="space-y-1">
+    <h3
+      class="mb-2 flex items-center gap-1 text-xs uppercase font-semibold tracking-wide"
+      :class="[
+        category.toLowerCase() === 'pinned'
+          ? 'text-primary-600/80 dark:text-primary-400/80'
+          : 'text-neutral-700 dark:text-neutral-300',
+      ]"
+    >
+      <UIcon
+        v-if="category.toLowerCase() === 'pinned'"
+        name="i-codicon:pinned"
+        class="size-3.5"
+      />
+      {{ category }}
+    </h3>
+    <div
+      v-for="thread in threads"
+      :key="thread.id"
+      @click="switchThread(thread)"
+      class="p-1.5 rounded-lg hover:bg-white dark:hover:bg-neutral-800 cursor-pointer group overflow-hidden"
+      :class="[
+        popperThreadId === thread.id || activeThread === thread.id
+          ? 'bg-white dark:bg-neutral-800'
+          : '',
+      ]"
+    >
+      <div class="flex justify-start gap-2 items-center relative">
+        <UIcon
+          v-if="thread.parent_thread_id"
+          name="i-carbon:branch"
+          class="size-3.5"
+        />
+        <span
+          v-if="editableThreadId != thread.id"
+          class="text-sm font-medium text-neutral-500 dark:text-neutral-400 truncate"
+          @dblclick="editThread(thread)"
+          :title="thread.title"
+        >
+          {{ thread.title }}
+        </span>
+        <UInput
+          v-if="editableThreadId === thread.id"
+          :id="`thread-input-${thread.id}`"
+          v-model="thread.title"
+          class="w-full"
+          :ui="{
+            base: 'truncate p-0 pb-0.5 ring-0 focus-visible:ring-0 border-b border-b-neutral-600/50 rounded-none bg-transparent',
+          }"
+          @blur="saveThread(thread)"
+          @keydown.enter="saveThread(thread)"
+        />
+
+        <div
+          @click.stop
+          class="h-full absolute right-0 pl-3 pr-0.5 gap-1 flex items-center group-hover:translate-x-1 rounded-lg transition-transform duration-100 bg-[linear-gradient(to_right,_transparent_0%,_white_20%,_white_100%)] dark:bg-[linear-gradient(to_right,_transparent_0%,_#262626_20%,_#262626_100%)]"
+          :class="[
+            popperThreadId === thread.id
+              ? 'transform translate-x-1'
+              : 'transform translate-x-[120%]',
+          ]"
+        >
+          <UTooltip
+            :disableHoverableContent="true"
+            :text="pinned ? unpinnedAction.tooltip : pinnedAction.tooltip"
+          >
+            <UButton
+              :icon="pinned ? unpinnedAction.icon : pinnedAction.icon"
+              variant="ghost"
+              color="neutral"
+              size="xs"
+              class="dark:hover:bg-neutral-700/70 rounded-md flex items-center"
+              @click="
+                pinned
+                  ? unpinnedAction.action(thread.id)
+                  : pinnedAction.action(thread.id)
+              "
+            />
+          </UTooltip>
+
+          <UPopover
+            @update:open="
+              (isOpen: boolean) => (popperThreadId = isOpen ? thread.id : null)
+            "
+            :open="popperThreadId === thread.id"
+          >
+            <UButton
+              :icon="moreOptionsAction.icon"
+              variant="ghost"
+              color="neutral"
+              size="xs"
+              :title="popperThreadId"
+              class="dark:hover:bg-neutral-700/70 rounded-md flex items-center"
+              :class="[
+                popperThreadId === thread.id ? 'dark:bg-neutral-700/70' : '',
+              ]"
+            />
+            <template #content>
+              <LazyThreadMenu :moreActions="moreActions" :thread="thread" />
+            </template>
+          </UPopover>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <DeleteModal
+    v-model="openDeleteModal"
+    :thread="threadToDelete"
+    @cancelDelete="cancelDelete"
+    @confirmDelete="confirmDelete"
+  />
+</template>
+
+<script setup lang="ts">
+const props = defineProps({
+  threads: {
+    type: Object,
+    default: () => {},
+  },
+  pinned: {
+    type: Boolean,
+    default: false,
+  },
+});
+const threadsStore = useThreadsStore();
+const popperThreadId = ref<number | null>(null);
+const { activeThread } = storeToRefs(threadsStore);
+const { $sync } = useNuxtApp();
+
+function switchThread(thread: any) {
+  navigateTo(`/${thread.id}`);
+}
+
+const editableThreadId = ref<number | null>(null);
+const editThread = (thread: any) => {
+  editableThreadId.value = thread.id;
+  requestAnimationFrame(() => {
+    const input = document.getElementById(`thread-input-${thread.id}`);
+    input?.focus();
+  });
+};
+
+const saveThread = (thread: any) => {
+  editableThreadId.value = null;
+  $sync.updateThread(thread.id, { title: thread.title });
+};
+
+const pinnedAction = ref({
+  icon: "i-codicon:pinned",
+  tooltip: "Pin Thread",
+  action: (id: string) => {
+    useNuxtApp().$sync.updateThread(id, { pinned: true });
+  },
+});
+
+const unpinnedAction = ref({
+  icon: "i-mdi-light:pin-off",
+  tooltip: "Unpin Thread",
+  action: (id: string) => {
+    useNuxtApp().$sync.updateThread(id, { pinned: false });
+  },
+});
+
+const moreOptionsAction = ref({
+  icon: "heroicons:ellipsis-horizontal-solid",
+  tooltip: "More options",
+});
+
+const openDeleteModal = ref(false);
+const threadToDelete = ref<any>(null);
+
+const moreActions = ref([
+  {
+    icon: props.pinned ? unpinnedAction.value.icon : pinnedAction.value.icon,
+    name: props.pinned ? "Unpin" : "Pin",
+    action: (thread: any) => {
+      if (props.pinned) {
+        unpinnedAction.value.action(thread.id);
+      } else {
+        pinnedAction.value.action(thread.id);
+      }
+    },
+  },
+  {
+    icon: "heroicons:pencil-square",
+    name: "Rename",
+    action: (thread) => {
+      editThread(thread);
+    },
+  },
+  {
+    icon: "heroicons:trash",
+    name: "Delete",
+    action: (thread) => {
+      popperThreadId.value = null;
+      threadToDelete.value = thread;
+      openDeleteModal.value = true;
+    },
+  },
+  {
+    icon: "heroicons:arrow-down-tray-20-solid",
+    name: "Export",
+    action: () => {
+      // Implement action to edit message
+    },
+  },
+]);
+
+const cancelDelete = () => {
+  openDeleteModal.value = false;
+  threadToDelete.value = null;
+};
+
+const confirmDelete = () => {
+  useNuxtApp().$sync.updateThread(threadToDelete.value?.id, { deleted: true });
+  openDeleteModal.value = false;
+  threadToDelete.value = null;
+};
+</script>
+
+<script lang="ts">
+export default {};
+</script>
+
+<style scoped>
+.gradient-bg-light {
+  background: linear-gradient(to right, transparent 0%, #fff 20%, #fff 100%);
+}
+
+.gradient-bg-dark {
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    #262626 20%,
+    #262626 100%
+  );
+}
+</style>
 ````
 
 ## File: packages/app/app/composables/usePromptStore.ts
@@ -6422,647 +8137,107 @@ export const usePromptStore = defineStore("prompt", () => {
 });
 ````
 
-## File: packages/app/app/workers/database.ts
-````typescript
-import SQLiteESMFactory from "wa-sqlite/dist/wa-sqlite.mjs";
-// @ts-ignore
-import { AccessHandlePoolVFS } from "wa-sqlite/src/examples/AccessHandlePoolVFS.js";
-import * as SQLite from "wa-sqlite";
+## File: packages/app/app/components/MarkdownRenderer.vue
+````vue
+<template>
+  <div
+    ref="root"
+    class="prose dark:prose-invert [&>div:last-child>p:last-child]:mb-0 [&>div:first-child>p:first-child]:mt-0 overflow-x-auto"
+  >
+    <template v-if="!allReady">
+      <!-- show a single skeleton block as placeholder until first chunk resolves -->
+      <MarkdownSkeleton :variant="variant" />
+    </template>
+    <template v-else>
+      <MarkdownChunkRenderer
+        v-for="(b, index) in blocks"
+        :key="index"
+        :block="b"
+        :variant="variant"
+      />
+    </template>
+  </div>
+</template>
 
-/**
- * A generic key-value store built on IndexedDB.
- *
- * @template K The type of the keys in the store. Must be an IndexedDB valid key type.
- * @template V The type of the values in the store. Can be any valid JavaScript type supported by IndexedDB.
- */
-class IndexedDBStore<K extends IDBValidKey, V> {
-  private dbName: string;
-  private storeName: string;
-  private db: IDBDatabase | null = null;
-  private dbOpenPromise: Promise<IDBDatabase> | null = null;
+<script setup lang="ts">
+import { marked } from "marked";
+import { useIntersectionObserver } from "@vueuse/core";
 
-  /**
-   * Creates an instance of IndexedDBStore.
-   * @param dbName The name of the IndexedDB database.
-   * @param storeName The name of the object store within the database.
-   */
-  constructor(dbName = "myAppDB", storeName = "keyValStore") {
-    this.dbName = dbName;
-    this.storeName = storeName;
-  }
+const emit = defineEmits(["rendered"]);
+const { content, chunked, variant } = withDefaults(
+  defineProps<{
+    content: string;
+    chunked?: boolean;
+    variant?: "user" | "assistant";
+  }>(),
+  { variant: "assistant" },
+);
+const blocks = computed(() =>
+  chunked ? marked.lexer(content || "").map((block) => block.raw) : [content],
+);
+const allReady = ref(false);
+const root = ref<HTMLElement | null>(null);
+const inView = ref(false);
+const firstShownAt = ref<number | null>(null);
 
-  /**
-   * Internal method to get or open the IndexedDB database connection.
-   * Ensures the database is only opened once and handles upgrades.
-   * @returns A promise that resolves with the IDBDatabase instance.
-   */
-  private async _getDB(): Promise<IDBDatabase> {
-    if (this.db) {
-      return this.db;
-    }
-
-    if (this.dbOpenPromise) {
-      return this.dbOpenPromise;
-    }
-
-    this.dbOpenPromise = new Promise((resolve, reject) => {
-      const request = indexedDB.open(this.dbName, 1);
-
-      request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
-        const db = (event.target as IDBOpenDBRequest).result;
-        if (!db.objectStoreNames.contains(this.storeName)) {
-          db.createObjectStore(this.storeName);
-        }
-      };
-
-      request.onsuccess = (event: Event) => {
-        this.db = (event.target as IDBOpenDBRequest).result;
-        resolve(this.db);
-        this.dbOpenPromise = null; // Clear the promise once resolved
-      };
-
-      request.onerror = (event: Event) => {
-        const error = (event.target as IDBRequest).error;
-        console.error(
-          `IndexedDB error: ${error?.name} - ${error?.message}`,
-          event,
-        );
-        reject(
-          new Error(
-            `Failed to open IndexedDB: ${error?.message || "Unknown error"}`,
-          ),
-        );
-        this.dbOpenPromise = null; // Clear the promise on error
-      };
-    });
-
-    return this.dbOpenPromise;
-  }
-
-  /**
-   * Sets (puts or updates) a value in the store.
-   * @param key The key to associate with the value.
-   * @param value The value to store.
-   * @returns A promise that resolves when the value has been successfully stored.
-   */
-  public async set(key: K, value: V): Promise<void> {
-    const db = await this._getDB();
-    return new Promise((resolve, reject) => {
-      // Specify 'readwrite' mode for writing operations
-      const transaction = db.transaction([this.storeName], "readwrite");
-      const store = transaction.objectStore(this.storeName);
-
-      // put() method will add or update the value based on the key
-      const request = store.put(value, key);
-
-      request.onsuccess = () => resolve();
-      request.onerror = (event: Event) => {
-        const error = (event.target as IDBRequest).error;
-        console.error(`Set error: ${error?.name} - ${error?.message}`, event);
-        reject(
-          new Error(
-            `Failed to set value: ${error?.message || "Unknown error"}`,
-          ),
-        );
-      };
-    });
-  }
-
-  /**
-   * Retrieves a value from the store by its key.
-   * @param key The key of the value to retrieve.
-   * @returns A promise that resolves with the retrieved value, or `undefined` if the key does not exist.
-   */
-  public async get(key: K): Promise<V | undefined> {
-    const db = await this._getDB();
-    return new Promise((resolve, reject) => {
-      // Specify 'readonly' mode for reading operations
-      const transaction = db.transaction([this.storeName], "readonly");
-      const store = transaction.objectStore(this.storeName);
-
-      const request = store.get(key);
-
-      request.onsuccess = (event: Event) => {
-        // Cast the result to the expected value type V
-        resolve((event.target as IDBRequest).result as V | undefined);
-      };
-      request.onerror = (event: Event) => {
-        const error = (event.target as IDBRequest).error;
-        console.error(`Get error: ${error?.name} - ${error?.message}`, event);
-        reject(
-          new Error(
-            `Failed to get value: ${error?.message || "Unknown error"}`,
-          ),
-        );
-      };
-    });
-  }
-
-  /**
-   * Deletes a value from the store by its key.
-   * @param key The key of the value to delete.
-   * @returns A promise that resolves when the value has been successfully deleted.
-   */
-  public async delete(key: K): Promise<void> {
-    const db = await this._getDB();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readwrite");
-      const store = transaction.objectStore(this.storeName);
-
-      const request = store.delete(key);
-
-      request.onsuccess = () => resolve();
-      request.onerror = (event: Event) => {
-        const error = (event.target as IDBRequest).error;
-        console.error(
-          `Delete error: ${error?.name} - ${error?.message}`,
-          event,
-        );
-        reject(
-          new Error(
-            `Failed to delete value: ${error?.message || "Unknown error"}`,
-          ),
-        );
-      };
-    });
-  }
-
-  /**
-   * Clears all key-value pairs from the object store.
-   * @returns A promise that resolves when the store has been successfully cleared.
-   */
-  public async clear(): Promise<void> {
-    const db = await this._getDB();
-    return new Promise((resolve, reject) => {
-      const transaction = db.transaction([this.storeName], "readwrite");
-      const store = transaction.objectStore(this.storeName);
-
-      const request = store.clear();
-
-      request.onsuccess = () => resolve();
-      request.onerror = (event: Event) => {
-        const error = (event.target as IDBRequest).error;
-        console.error(`Clear error: ${error?.name} - ${error?.message}`, event);
-        reject(
-          new Error(
-            `Failed to clear store: ${error?.message || "Unknown error"}`,
-          ),
-        );
-      };
-    });
-  }
-}
-
-const kvStore = new IndexedDBStore<string, string>();
-
-let sqlite3: ReturnType<typeof SQLite.Factory>;
-let db: number;
-let vfs: any;
-
-let dbReadyResolvers: Array<() => void> = [];
-let isDbReady = false;
-
-async function clearDirectoryRecursive(
-  directoryHandle: FileSystemDirectoryHandle,
-) {
-  for await (const entry of directoryHandle.values()) {
-    if (entry.kind === "file") {
-      await directoryHandle.removeEntry(entry.name);
-    } else if (entry.kind === "directory") {
-      await clearDirectoryRecursive(entry);
-      await directoryHandle.removeEntry(entry.name);
-    }
-  }
-}
-
-export async function clearAllOPFSStorage() {
-  try {
-    if (db) await sqlite3.close(db);
-    if (vfs) await vfs.close();
-    db = 0;
-    vfs = null;
-    isDbReady = false;
-    const rootDirHandle = await navigator.storage.getDirectory();
-    await clearDirectoryRecursive(rootDirHandle);
-    console.log("cleared!");
-  } catch (error) {
-    console.error("Error clearing OPFS storage:", error);
-    throw error;
-  }
-}
-
-export const waitForDatabase = async () => {
-  if (isDbReady) {
-    return Promise.resolve();
-  }
-  initDatabase();
-  return new Promise((resolve) => {
-    dbReadyResolvers.push(resolve as any);
-  });
-};
-
-let isStarting = false;
-export const initDatabase = async () => {
-  if (isStarting) return;
-  isStarting = true;
-
-  // force clear opfs on breaking updates
-  const updateId = "one";
-  if ((await kvStore.get("clear")) !== updateId) {
-    console.log("clearing opfs...");
-    await clearAllOPFSStorage();
-    await kvStore.set("clear", updateId);
-    console.log("clearing opfs... done.");
-  }
-
-  const module = await SQLiteESMFactory();
-  sqlite3 = SQLite.Factory(module);
-  vfs = await AccessHandlePoolVFS.create("ahp", module);
-  sqlite3.vfs_register(vfs, true);
-  db = await sqlite3.open_v2("mydb");
-
-  await sqlite3.exec(
-    db,
-    [
-      "PRAGMA locking_mode = exclusive;",
-      "PRAGMA journal_mode = wal;",
-      "PRAGMA synchronous = NORMAL;",
-    ].join(""),
-  );
-
-  // Initialize threads table
-  await sqlite3.exec(
-    db,
-    `
-      CREATE TABLE IF NOT EXISTS threads (
-        id TEXT PRIMARY KEY,
-        title TEXT NOT NULL,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        last_message_at INTEGER NOT NULL,
-        parent_thread_id TEXT,
-        status TEXT NOT NULL DEFAULT 'ready',
-        deleted INTEGER DEFAULT 0,
-        pinned INTEGER DEFAULT 0,
-        clock INTEGER
-      )
-    `,
-  );
-
-  // Initialize messages table
-  await sqlite3.exec(
-    db,
-    `
-      CREATE TABLE IF NOT EXISTS messages (
-        id TEXT PRIMARY KEY,
-        role TEXT NOT NULL,
-        content TEXT NOT NULL,
-        data TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        error TEXT,
-        deleted INTEGER DEFAULT 0,
-        thread_id TEXT NOT NULL,
-        stream_id TEXT,
-        message_index INTEGER NOT NULL DEFAULT 0,
-        clock INTEGER
-      )
-    `,
-  );
-
-  // Initialize kv table
-  await sqlite3.exec(
-    db,
-    `
-      CREATE TABLE IF NOT EXISTS kv (
-        id TEXT PRIMARY KEY,
-        name TEXT NOT NULL UNIQUE,
-        value TEXT,
-        created_at INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL,
-        clock INTEGER
-      )
-    `,
-  );
-
-  // Initialize clock
-  await sqlite3.exec(
-    db,
-    `
-      CREATE TABLE IF NOT EXISTS clock (
-        id INTEGER PRIMARY KEY,
-        clock INTEGER
-      );
-    `,
-  );
-  await sqlite3.exec(
-    db,
-    `INSERT OR IGNORE INTO clock (id, clock) VALUES (1, 0);`,
-  );
-
-  let checkFTS = false;
-  await sqlite3.exec(
-    db,
-    "SELECT name FROM sqlite_master WHERE type='table' AND name='threads_fts';",
-    (row) => {
-      if (row[0] === "threads_fts") checkFTS = true;
+onMounted(() => {
+  const { stop } = useIntersectionObserver(
+    root,
+    ([entry]) => {
+      if (!entry) return;
+      if (entry.isIntersecting) {
+        inView.value = true;
+        // Once visible, stop observing
+        stop();
+      }
     },
+    { rootMargin: "200px 0px 200px 0px", threshold: 0.01 },
   );
+});
 
-  await sqlite3.exec(
-    db,
-    `
-    CREATE VIRTUAL TABLE IF NOT EXISTS threads_fts USING fts5(
-      title,
-      messages_content,
-      thread_id,
-    );
-  `,
-  );
-
-  // Triggers to keep threads_fts in sync with the threads table
-  await sqlite3.exec(
-    db,
-    `
-    -- When a new thread is created, insert a corresponding row into the FTS table.
-    -- The messages_content is initially empty.
-    CREATE TRIGGER IF NOT EXISTS threads_after_insert
-    AFTER INSERT ON threads
-    BEGIN
-      INSERT INTO threads_fts(thread_id, title, messages_content)
-      VALUES (new.id, new.title, '');
-    END;
-
-    -- When a thread is deleted, delete its FTS entry.
-    CREATE TRIGGER IF NOT EXISTS threads_after_delete
-    AFTER DELETE ON threads
-    BEGIN
-      DELETE FROM threads_fts WHERE thread_id = old.id;
-    END;
-
-    -- When a thread's title is updated, update the FTS entry.
-    CREATE TRIGGER IF NOT EXISTS threads_after_update
-    AFTER UPDATE OF title ON threads
-    BEGIN
-      UPDATE threads_fts SET title = new.title WHERE thread_id = new.id;
-    END;
-  `,
-  );
-
-  // Triggers to keep threads_fts in sync with the messages table
-  await sqlite3.exec(
-    db,
-    `
-    -- A helper function to rebuild the messages_content for a given thread.
-    -- This is the most robust way to handle message INSERT, UPDATE, and DELETE.
-    CREATE TRIGGER IF NOT EXISTS messages_after_insert
-    AFTER INSERT ON messages
-    BEGIN
-      UPDATE threads_fts
-      SET messages_content = (
-        SELECT GROUP_CONCAT(content, ' ')
-        FROM messages
-        WHERE thread_id = new.thread_id
-      )
-      WHERE thread_id = new.thread_id;
-    END;
-
-    -- When a message is updated, rebuild the content for the entire thread.
-    CREATE TRIGGER IF NOT EXISTS messages_after_update
-    AFTER UPDATE OF content ON messages
-    BEGIN
-      UPDATE threads_fts
-      SET messages_content = (
-        SELECT GROUP_CONCAT(content, ' ')
-        FROM messages
-        WHERE thread_id = new.thread_id
-      )
-      WHERE thread_id = new.thread_id;
-    END;
-
-    -- When a message is deleted, rebuild the content for the entire thread.
-    CREATE TRIGGER IF NOT EXISTS messages_after_delete
-    AFTER DELETE ON messages
-    BEGIN
-      UPDATE threads_fts
-      SET messages_content = (
-        SELECT GROUP_CONCAT(content, ' ')
-        FROM messages
-        WHERE thread_id = old.thread_id
-      )
-      WHERE thread_id = old.thread_id;
-    END;
-  `,
-  );
-
-  if (!checkFTS) {
-    console.log("rebuilding fts index...");
-    await sqlite3.exec(db, "DELETE FROM threads_fts;");
-    await sqlite3.exec(
-      db,
-      `
-      INSERT INTO threads_fts (thread_id, title, messages_content)
-      SELECT
-        t.id,
-        t.title,
-        COALESCE(GROUP_CONCAT(m.content, ' '), '')
-      FROM
-        threads AS t
-      LEFT JOIN
-        messages AS m ON t.id = m.thread_id
-      GROUP BY
-        t.id;
-    `,
-    );
-    console.log("rebuilding fts index... done.");
-  }
-
-  isDbReady = true;
-  console.log("db ready!");
-  dbReadyResolvers.forEach((resolve) => resolve());
-  dbReadyResolvers = [];
-};
-
-export const dbExec = async ({
-  sql,
-  bindings,
-}: {
-  sql: string;
-  bindings: any;
-}) => {
-  await waitForDatabase();
-  let columns: any[] = [];
-  const rows: any[] = [];
-  for await (const stmt of sqlite3.statements(db, sql)) {
-    if (bindings) {
-      sqlite3.bind_collection(stmt, bindings);
-    }
-    while ((await sqlite3.step(stmt)) === SQLite.SQLITE_ROW) {
-      columns = columns.length === 0 ? sqlite3.column_names(stmt) : columns;
-      const row = sqlite3.row(stmt);
-      rows.push(row);
+async function preRenderAll() {
+  if (!import.meta.client) return;
+  allReady.value = false;
+  const { renderMarkdownChunk } = await import("~/utils/markdown-lazy");
+  await Promise.all((blocks.value || []).map((b) => renderMarkdownChunk(b)));
+  // Guarantee a brief skeleton display for user variant on initial load
+  const minMs = variant === "user" ? 220 : 0;
+  if (firstShownAt.value && minMs > 0) {
+    const elapsed = performance.now() - firstShownAt.value;
+    if (elapsed < minMs) {
+      await new Promise((r) => setTimeout(r, minMs - elapsed));
     }
   }
-  return {
-    rows: rows,
-    columns: columns,
-    changes: sqlite3.changes(db),
-  };
+  allReady.value = true;
+  emit("rendered");
+}
+
+watch(
+  [() => content, inView],
+  async () => {
+    if (!import.meta.client) {
+      allReady.value = false;
+      return;
+    }
+    if (!inView.value) {
+      allReady.value = false;
+      return;
+    }
+    if (firstShownAt.value === null) firstShownAt.value = performance.now();
+    await preRenderAll();
+  },
+  { immediate: true },
+);
+</script>
+
+<script lang="ts">
+export default {
+  components: {
+    MarkdownSkeleton: () => import("./MarkdownSkeleton.vue"),
+    MarkdownChunkRenderer: () => import("./MarkdownChunkRenderer.client.vue"),
+  },
 };
-````
-
-## File: README.md
-````markdown
-# Nuxflare Chat
-
-> Nuxflare Chat was originally started as a project for the T3 Chat Cloneathon (https://cloneathon.t3.chat).
-
-Nuxflare Chat is a blazing-fast, open-source AI chat app built with Cloudflare and Nuxt.
-
-## ✨ What Makes It Special
-
-### 🏎️ **Lightning Fast & Local-First**
-
-- Store everything in your browser with wa-sqlite + OPFS
-- Switch between threads instantly—no network waiting
-- Full-text search through all your chats locally with SQLite FTS5
-- Smart tab coordination: one WebSocket connection and database connection shared across all tabs
-
-### 🔄 **Real-Time Everything**
-
-- Custom sync engine with logical clocks
-- Durable, resumable streams that survive network hiccups
-- Live updates across all your tabs and devices
-- Built on Cloudflare Durable Objects for global edge performance
-
-### 🎨 **Beautiful & Thoughtful Design**
-
-- Gorgeous light/dark modes with glassmorphic effects
-- Optimized chunked markdown rendering
-- Code syntax highlighting + LaTeX support with KaTeX
-- Smooth animations that don't get in your way
-
-### 🧠 **AI Superpowers**
-
-- Any OpenRouter model + provider-specific keys
-- Thinking models with reasoning streams
-- Edit/delete messages, branch conversations, retry generations
-- Image and PDF attachments support
-- Web search grounding
-
-### 🛠️ **Developer Experience**
-
-- Deploy to your Cloudflare account in one command with [Alchemy](https://alchemy.run)
-- Works with any OpenAuth.js endpoint
-- Clean subdomain architecture (auth, api, app)
-- Zero-config development setup
-
-## 🚀 Quick Start
-
-### Prerequisites
-
-- Cloudflare account with R2 enabled
-- Domain pointed to Cloudflare nameservers
-- Google OAuth credentials
-
-### Deploy to Production
-
-1. **Clone and configure**
-
-   ```bash
-   git clone https://github.com/nuxflare/chat
-   cd nuxflare-chat
-   cp .env.example .env
-   ```
-
-2. **Set up environment**
-   Edit `.env` with your Google OAuth credentials:
-
-   ```
-   GOOGLE_CLIENT_ID=your_client_id
-   GOOGLE_CLIENT_SECRET=your_secret
-   ```
-
-3. **Configure domain**
-   Edit `alchemy.run.ts` with your domain and Cloudflare zone ID.
-
-4. **Deploy everything**
-   ```bash
-   bun install
-   bun run alchemy.run.ts --stage production
-   ```
-
-That's it! Your chat app is live at `https://your-domain.com` 🎉
-
-### Local Development
-
-```bash
-bun install
-
-# Terminal 1: Frontend
-cd packages/app && bun run dev
-
-# Terminal 2: API
-cd packages/api && bunx wrangler dev
-```
-
-**Auth Setup for Development**
-
-By default, development mode uses `auth.chat.nuxflare.com` as the auth endpoint—you can keep using this for quick development.
-
-To use your own auth endpoint:
-
-- Deploy once with the production steps above
-- Update the auth URL in `packages/api/.dev.vars` to point to your deployment
-
-Alternatively, run the auth server locally:
-
-```bash
-# Terminal 3: Auth (optional)
-cd packages/auth && bunx wrangler dev
-```
-
-## 🏗️ Architecture
-
-**Edge-First Design**
-
-- **Frontend**: Nuxt 3 + Nuxt UI + Tailwind v4
-- **Backend**: Cloudflare Workers + Durable Objects + R2
-- **AI**: OpenRouter + Vercel AI SDK
-- **Auth**: OpenAuth.js compatible
-
-**Smart Client Coordination**
-
-Multiple tabs? No problem. We use web locks + service workers to ensure only one tab handles the WebSocket connection and database, then broadcasts updates to others. Saves bandwidth and prevents conflicts.
-
-**Durable Objects Magic**
-
-- `User DO`: Your personal data store, located close to you
-- `Stream DO`: Handles resumable AI response streams
-
-## 🛣️ What's Next
-
-We're just getting started. Coming soon:
-
-- 🔌 MCP servers integration
-- 👥 Teams and multi-user chats
-- 🤖 More agentic workflows
-- 🎛️ Custom model/provider management
-- ✨ Smoother animations and UX
-
-_Basically, if you see a cool feature in any chat app, let us know and we WILL start working on it._
-
-## 🤝 Contributing
-
-Found a bug? Have an idea? PRs and issues welcome! This started as a hackathon project but has grown into something the community can build on together.
-
-## 📄 License
-
-MIT - Go wild, build cool stuff.
-
----
-
-_Made with ☕_
+</script>
 ````
 
 ## File: packages/app/app/components/ModelSelector.vue
@@ -7477,6 +8652,600 @@ export const useThreadsStore = defineStore("threads", () => {
 });
 ````
 
+## File: packages/app/app/workers/database.ts
+````typescript
+import SQLiteESMFactory from "wa-sqlite/dist/wa-sqlite.mjs";
+// @ts-ignore
+import { AccessHandlePoolVFS } from "wa-sqlite/src/examples/AccessHandlePoolVFS.js";
+import * as SQLite from "wa-sqlite";
+
+/**
+ * A generic key-value store built on IndexedDB.
+ *
+ * @template K The type of the keys in the store. Must be an IndexedDB valid key type.
+ * @template V The type of the values in the store. Can be any valid JavaScript type supported by IndexedDB.
+ */
+class IndexedDBStore<K extends IDBValidKey, V> {
+  private dbName: string;
+  private storeName: string;
+  private db: IDBDatabase | null = null;
+  private dbOpenPromise: Promise<IDBDatabase> | null = null;
+
+  /**
+   * Creates an instance of IndexedDBStore.
+   * @param dbName The name of the IndexedDB database.
+   * @param storeName The name of the object store within the database.
+   */
+  constructor(dbName = "myAppDB", storeName = "keyValStore") {
+    this.dbName = dbName;
+    this.storeName = storeName;
+  }
+
+  /**
+   * Internal method to get or open the IndexedDB database connection.
+   * Ensures the database is only opened once and handles upgrades.
+   * @returns A promise that resolves with the IDBDatabase instance.
+   */
+  private async _getDB(): Promise<IDBDatabase> {
+    if (this.db) {
+      return this.db;
+    }
+
+    if (this.dbOpenPromise) {
+      return this.dbOpenPromise;
+    }
+
+    this.dbOpenPromise = new Promise((resolve, reject) => {
+      const request = indexedDB.open(this.dbName, 1);
+
+      request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
+        const db = (event.target as IDBOpenDBRequest).result;
+        if (!db.objectStoreNames.contains(this.storeName)) {
+          db.createObjectStore(this.storeName);
+        }
+      };
+
+      request.onsuccess = (event: Event) => {
+        this.db = (event.target as IDBOpenDBRequest).result;
+        resolve(this.db);
+        this.dbOpenPromise = null; // Clear the promise once resolved
+      };
+
+      request.onerror = (event: Event) => {
+        const error = (event.target as IDBRequest).error;
+        console.error(
+          `IndexedDB error: ${error?.name} - ${error?.message}`,
+          event,
+        );
+        reject(
+          new Error(
+            `Failed to open IndexedDB: ${error?.message || "Unknown error"}`,
+          ),
+        );
+        this.dbOpenPromise = null; // Clear the promise on error
+      };
+    });
+
+    return this.dbOpenPromise;
+  }
+
+  /**
+   * Sets (puts or updates) a value in the store.
+   * @param key The key to associate with the value.
+   * @param value The value to store.
+   * @returns A promise that resolves when the value has been successfully stored.
+   */
+  public async set(key: K, value: V): Promise<void> {
+    const db = await this._getDB();
+    return new Promise((resolve, reject) => {
+      // Specify 'readwrite' mode for writing operations
+      const transaction = db.transaction([this.storeName], "readwrite");
+      const store = transaction.objectStore(this.storeName);
+
+      // put() method will add or update the value based on the key
+      const request = store.put(value, key);
+
+      request.onsuccess = () => resolve();
+      request.onerror = (event: Event) => {
+        const error = (event.target as IDBRequest).error;
+        console.error(`Set error: ${error?.name} - ${error?.message}`, event);
+        reject(
+          new Error(
+            `Failed to set value: ${error?.message || "Unknown error"}`,
+          ),
+        );
+      };
+    });
+  }
+
+  /**
+   * Retrieves a value from the store by its key.
+   * @param key The key of the value to retrieve.
+   * @returns A promise that resolves with the retrieved value, or `undefined` if the key does not exist.
+   */
+  public async get(key: K): Promise<V | undefined> {
+    const db = await this._getDB();
+    return new Promise((resolve, reject) => {
+      // Specify 'readonly' mode for reading operations
+      const transaction = db.transaction([this.storeName], "readonly");
+      const store = transaction.objectStore(this.storeName);
+
+      const request = store.get(key);
+
+      request.onsuccess = (event: Event) => {
+        // Cast the result to the expected value type V
+        resolve((event.target as IDBRequest).result as V | undefined);
+      };
+      request.onerror = (event: Event) => {
+        const error = (event.target as IDBRequest).error;
+        console.error(`Get error: ${error?.name} - ${error?.message}`, event);
+        reject(
+          new Error(
+            `Failed to get value: ${error?.message || "Unknown error"}`,
+          ),
+        );
+      };
+    });
+  }
+
+  /**
+   * Deletes a value from the store by its key.
+   * @param key The key of the value to delete.
+   * @returns A promise that resolves when the value has been successfully deleted.
+   */
+  public async delete(key: K): Promise<void> {
+    const db = await this._getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([this.storeName], "readwrite");
+      const store = transaction.objectStore(this.storeName);
+
+      const request = store.delete(key);
+
+      request.onsuccess = () => resolve();
+      request.onerror = (event: Event) => {
+        const error = (event.target as IDBRequest).error;
+        console.error(
+          `Delete error: ${error?.name} - ${error?.message}`,
+          event,
+        );
+        reject(
+          new Error(
+            `Failed to delete value: ${error?.message || "Unknown error"}`,
+          ),
+        );
+      };
+    });
+  }
+
+  /**
+   * Clears all key-value pairs from the object store.
+   * @returns A promise that resolves when the store has been successfully cleared.
+   */
+  public async clear(): Promise<void> {
+    const db = await this._getDB();
+    return new Promise((resolve, reject) => {
+      const transaction = db.transaction([this.storeName], "readwrite");
+      const store = transaction.objectStore(this.storeName);
+
+      const request = store.clear();
+
+      request.onsuccess = () => resolve();
+      request.onerror = (event: Event) => {
+        const error = (event.target as IDBRequest).error;
+        console.error(`Clear error: ${error?.name} - ${error?.message}`, event);
+        reject(
+          new Error(
+            `Failed to clear store: ${error?.message || "Unknown error"}`,
+          ),
+        );
+      };
+    });
+  }
+}
+
+const kvStore = new IndexedDBStore<string, string>();
+
+let sqlite3: ReturnType<typeof SQLite.Factory>;
+let db: number;
+let vfs: any;
+
+let dbReadyResolvers: Array<() => void> = [];
+let isDbReady = false;
+
+export interface ThreadPreview {
+  id: string;
+  title: string;
+  updated_at: number;
+  last_message_at: number;
+  pinned: 0 | 1;
+  deleted: 0 | 1;
+  last_message_snippet: string;
+  message_count: number;
+}
+
+async function clearDirectoryRecursive(
+  directoryHandle: FileSystemDirectoryHandle,
+) {
+  // Cast to any to access OPFS async iterator in TS targets lacking lib types
+  for await (const entry of (directoryHandle as any).values()) {
+    if (entry.kind === "file") {
+      await directoryHandle.removeEntry(entry.name);
+    } else if (entry.kind === "directory") {
+      await clearDirectoryRecursive(entry);
+      await directoryHandle.removeEntry(entry.name);
+    }
+  }
+}
+
+export async function clearAllOPFSStorage() {
+  try {
+    if (db) await sqlite3.close(db);
+    if (vfs) await vfs.close();
+    db = 0;
+    vfs = null;
+    isDbReady = false;
+    const rootDirHandle = await navigator.storage.getDirectory();
+    await clearDirectoryRecursive(rootDirHandle);
+    console.log("cleared!");
+  } catch (error) {
+    console.error("Error clearing OPFS storage:", error);
+    throw error;
+  }
+}
+
+export const waitForDatabase = async () => {
+  if (isDbReady) {
+    return Promise.resolve();
+  }
+  initDatabase();
+  return new Promise((resolve) => {
+    dbReadyResolvers.push(resolve as any);
+  });
+};
+
+let isStarting = false;
+export const initDatabase = async () => {
+  if (isStarting) return;
+  isStarting = true;
+
+  // force clear opfs on breaking updates
+  const updateId = "one";
+  if ((await kvStore.get("clear")) !== updateId) {
+    console.log("clearing opfs...");
+    await clearAllOPFSStorage();
+    await kvStore.set("clear", updateId);
+    console.log("clearing opfs... done.");
+  }
+
+  const module = await SQLiteESMFactory();
+  sqlite3 = SQLite.Factory(module);
+  vfs = await AccessHandlePoolVFS.create("ahp", module);
+  sqlite3.vfs_register(vfs, true);
+  db = await sqlite3.open_v2("mydb");
+
+  await sqlite3.exec(
+    db,
+    [
+      "PRAGMA locking_mode = exclusive;",
+      "PRAGMA journal_mode = wal;",
+      "PRAGMA synchronous = NORMAL;",
+    ].join(""),
+  );
+
+  // Initialize threads table
+  await sqlite3.exec(
+    db,
+    `
+      CREATE TABLE IF NOT EXISTS threads (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        last_message_at INTEGER NOT NULL,
+        parent_thread_id TEXT,
+        status TEXT NOT NULL DEFAULT 'ready',
+        deleted INTEGER DEFAULT 0,
+        pinned INTEGER DEFAULT 0,
+        clock INTEGER
+      )
+    `,
+  );
+
+  // Initialize messages table
+  await sqlite3.exec(
+    db,
+    `
+      CREATE TABLE IF NOT EXISTS messages (
+        id TEXT PRIMARY KEY,
+        role TEXT NOT NULL,
+        content TEXT NOT NULL,
+        data TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        error TEXT,
+        deleted INTEGER DEFAULT 0,
+        thread_id TEXT NOT NULL,
+        stream_id TEXT,
+        message_index INTEGER NOT NULL DEFAULT 0,
+        clock INTEGER
+      )
+    `,
+  );
+
+  // Initialize kv table
+  await sqlite3.exec(
+    db,
+    `
+      CREATE TABLE IF NOT EXISTS kv (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL UNIQUE,
+        value TEXT,
+        created_at INTEGER NOT NULL,
+        updated_at INTEGER NOT NULL,
+        clock INTEGER
+      )
+    `,
+  );
+
+  // Initialize clock
+  await sqlite3.exec(
+    db,
+    `
+      CREATE TABLE IF NOT EXISTS clock (
+        id INTEGER PRIMARY KEY,
+        clock INTEGER
+      );
+    `,
+  );
+  await sqlite3.exec(
+    db,
+    `INSERT OR IGNORE INTO clock (id, clock) VALUES (1, 0);`,
+  );
+
+  let checkFTS = false;
+  await sqlite3.exec(
+    db,
+    "SELECT name FROM sqlite_master WHERE type='table' AND name='threads_fts';",
+    (row) => {
+      if (row[0] === "threads_fts") checkFTS = true;
+    },
+  );
+
+  await sqlite3.exec(
+    db,
+    `
+    CREATE VIRTUAL TABLE IF NOT EXISTS threads_fts USING fts5(
+      title,
+      messages_content,
+      thread_id,
+    );
+  `,
+  );
+
+  // Triggers to keep threads_fts in sync with the threads table
+  await sqlite3.exec(
+    db,
+    `
+    -- When a new thread is created, insert a corresponding row into the FTS table.
+    -- The messages_content is initially empty.
+    CREATE TRIGGER IF NOT EXISTS threads_after_insert
+    AFTER INSERT ON threads
+    BEGIN
+      INSERT INTO threads_fts(thread_id, title, messages_content)
+      VALUES (new.id, new.title, '');
+    END;
+
+    -- When a thread is deleted, delete its FTS entry.
+    CREATE TRIGGER IF NOT EXISTS threads_after_delete
+    AFTER DELETE ON threads
+    BEGIN
+      DELETE FROM threads_fts WHERE thread_id = old.id;
+    END;
+
+    -- When a thread's title is updated, update the FTS entry.
+    CREATE TRIGGER IF NOT EXISTS threads_after_update
+    AFTER UPDATE OF title ON threads
+    BEGIN
+      UPDATE threads_fts SET title = new.title WHERE thread_id = new.id;
+    END;
+  `,
+  );
+
+  // Triggers to keep threads_fts in sync with the messages table
+  await sqlite3.exec(
+    db,
+    `
+    -- A helper function to rebuild the messages_content for a given thread.
+    -- This is the most robust way to handle message INSERT, UPDATE, and DELETE.
+    CREATE TRIGGER IF NOT EXISTS messages_after_insert
+    AFTER INSERT ON messages
+    BEGIN
+      UPDATE threads_fts
+      SET messages_content = (
+        SELECT GROUP_CONCAT(content, ' ')
+        FROM messages
+        WHERE thread_id = new.thread_id
+      )
+      WHERE thread_id = new.thread_id;
+    END;
+
+    -- When a message is updated, rebuild the content for the entire thread.
+    CREATE TRIGGER IF NOT EXISTS messages_after_update
+    AFTER UPDATE OF content ON messages
+    BEGIN
+      UPDATE threads_fts
+      SET messages_content = (
+        SELECT GROUP_CONCAT(content, ' ')
+        FROM messages
+        WHERE thread_id = new.thread_id
+      )
+      WHERE thread_id = new.thread_id;
+    END;
+
+    -- When a message is deleted, rebuild the content for the entire thread.
+    CREATE TRIGGER IF NOT EXISTS messages_after_delete
+    AFTER DELETE ON messages
+    BEGIN
+      UPDATE threads_fts
+      SET messages_content = (
+        SELECT GROUP_CONCAT(content, ' ')
+        FROM messages
+        WHERE thread_id = old.thread_id
+      )
+      WHERE thread_id = old.thread_id;
+    END;
+  `,
+  );
+
+  if (!checkFTS) {
+    console.log("rebuilding fts index...");
+    await sqlite3.exec(db, "DELETE FROM threads_fts;");
+    await sqlite3.exec(
+      db,
+      `
+      INSERT INTO threads_fts (thread_id, title, messages_content)
+      SELECT
+        t.id,
+        t.title,
+        COALESCE(GROUP_CONCAT(m.content, ' '), '')
+      FROM
+        threads AS t
+      LEFT JOIN
+        messages AS m ON t.id = m.thread_id
+      GROUP BY
+        t.id;
+    `,
+    );
+    console.log("rebuilding fts index... done.");
+  }
+
+  isDbReady = true;
+  console.log("db ready!");
+  try {
+    // mark readiness for perf tooling
+    if (typeof performance !== "undefined" && performance.mark) {
+      performance.mark("db_worker_ready");
+    }
+    // broadcast an event for listeners
+    dispatchEvent(new CustomEvent("dbReady"));
+  } catch {
+    // no-op in environments without performance or CustomEvent
+  }
+  dbReadyResolvers.forEach((resolve) => resolve());
+  dbReadyResolvers = [];
+};
+
+/**
+ * Hint the worker to initialize during idle time without blocking UI.
+ * Safe to call multiple times.
+ */
+export const warmupDatabase = () => {
+  if (isDbReady || isStarting) return;
+  const kickoff = () => initDatabase();
+  // Prefer requestIdleCallback when available
+  // @ts-ignore - not in lib.dom.d.ts for some TS targets
+  const ric:
+    | ((cb: () => void, opts?: { timeout?: number }) => number)
+    | undefined = (globalThis as any).requestIdleCallback;
+  if (typeof ric === "function") ric(() => kickoff(), { timeout: 500 });
+  else setTimeout(kickoff, 0);
+};
+
+/**
+ * Subscribe to DB ready without awaiting a promise. Invokes immediately if ready.
+ */
+export const onDbReady = (cb: () => void) => {
+  if (isDbReady) cb();
+  else dbReadyResolvers.push(cb);
+};
+
+export const dbExec = async ({
+  sql,
+  bindings,
+}: {
+  sql: string;
+  bindings: any;
+}) => {
+  await waitForDatabase();
+  let columns: any[] = [];
+  const rows: any[] = [];
+  for await (const stmt of sqlite3.statements(db, sql)) {
+    if (bindings) {
+      sqlite3.bind_collection(stmt, bindings);
+    }
+    while ((await sqlite3.step(stmt)) === SQLite.SQLITE_ROW) {
+      columns = columns.length === 0 ? sqlite3.column_names(stmt) : columns;
+      const row = sqlite3.row(stmt);
+      rows.push(row);
+    }
+  }
+  return {
+    rows: rows,
+    columns: columns,
+    changes: sqlite3.changes(db),
+  };
+};
+
+/**
+ * Query minimal preview rows for threads with deterministic ordering.
+ * Enforces: pinned DESC, last_message_at DESC, updated_at DESC.
+ */
+export async function getThreadPreviews(): Promise<ThreadPreview[]> {
+  await waitForDatabase();
+  const sql = `
+    SELECT
+      t.id,
+      t.title,
+      t.updated_at,
+      t.last_message_at,
+      t.pinned,
+      t.deleted,
+      SUBSTR(COALESCE((
+        SELECT m2.content
+        FROM messages m2
+        WHERE m2.thread_id = t.id AND m2.deleted = 0
+        ORDER BY m2.created_at DESC, m2.message_index DESC
+        LIMIT 1
+      ), ''), 1, 140) AS last_message_snippet,
+      (
+        SELECT COUNT(1)
+        FROM messages m3
+        WHERE m3.thread_id = t.id AND m3.deleted = 0
+      ) AS message_count
+    FROM threads t
+    WHERE t.deleted = 0
+    ORDER BY t.pinned DESC, t.last_message_at DESC, t.updated_at DESC;
+  `;
+  const items: ThreadPreview[] = [];
+  for await (const stmt of sqlite3.statements(db, sql)) {
+    while ((await sqlite3.step(stmt)) === SQLite.SQLITE_ROW) {
+      const row = sqlite3.row(stmt) as any[];
+      const [
+        id,
+        title,
+        updated_at,
+        last_message_at,
+        pinned,
+        deleted,
+        last_message_snippet,
+        message_count,
+      ] = row;
+      items.push({
+        id: String(id),
+        title: String(title ?? ""),
+        updated_at: Number(updated_at ?? 0),
+        last_message_at: Number(last_message_at ?? 0),
+        pinned: Number(pinned ?? 0) as 0 | 1,
+        deleted: Number(deleted ?? 0) as 0 | 1,
+        last_message_snippet: String(last_message_snippet ?? ""),
+        message_count: Number(message_count ?? 0),
+      });
+    }
+  }
+  return items;
+}
+````
+
 ## File: alchemy.run.ts
 ````typescript
 import alchemy from "alchemy";
@@ -7588,6 +9357,188 @@ const app = await Nuxt("app", {
 });
 
 await context.finalize();
+````
+
+## File: README.md
+````markdown
+# Nuxflare Chat
+
+> Nuxflare Chat was originally started as a project for the T3 Chat Cloneathon (https://cloneathon.t3.chat).
+
+Nuxflare Chat is a blazing-fast, open-source AI chat app built with Cloudflare and Nuxt.
+
+## ✨ What Makes It Special
+
+### 🏎️ **Lightning Fast & Local-First**
+
+- Store everything in your browser with wa-sqlite + OPFS
+- Switch between threads instantly—no network waiting
+- Full-text search through all your chats locally with SQLite FTS5
+- Smart tab coordination: one WebSocket connection and database connection shared across all tabs
+
+### 🔄 **Real-Time Everything**
+
+- Custom sync engine with logical clocks
+- Durable, resumable streams that survive network hiccups
+- Live updates across all your tabs and devices
+- Built on Cloudflare Durable Objects for global edge performance
+
+### 🎨 **Beautiful & Thoughtful Design**
+
+- Gorgeous light/dark modes with glassmorphic effects
+- Optimized chunked markdown rendering
+- Code syntax highlighting + LaTeX support with KaTeX
+- Smooth animations that don't get in your way
+
+### 🧠 **AI Superpowers**
+
+- Any OpenRouter model + provider-specific keys
+- Thinking models with reasoning streams
+- Edit/delete messages, branch conversations, retry generations
+- Image and PDF attachments support
+- Web search grounding
+
+### 🛠️ **Developer Experience**
+
+- Deploy to your Cloudflare account in one command with [Alchemy](https://alchemy.run)
+- Works with any OpenAuth.js endpoint
+- Clean subdomain architecture (auth, api, app)
+- Zero-config development setup
+
+## 🚀 Quick Start
+
+### Prerequisites
+
+- Cloudflare account with R2 enabled
+- Domain pointed to Cloudflare nameservers
+- Google OAuth credentials
+
+### Deploy to Production
+
+1. **Clone and configure**
+
+   ```bash
+   git clone https://github.com/nuxflare/chat
+   cd nuxflare-chat
+   cp .env.example .env
+   ```
+
+2. **Set up environment**
+   Edit `.env` with your Google OAuth credentials:
+
+   ```
+   GOOGLE_CLIENT_ID=your_client_id
+   GOOGLE_CLIENT_SECRET=your_secret
+   ```
+
+3. **Configure domain**
+   Edit `alchemy.run.ts` with your domain and Cloudflare zone ID.
+
+4. **Deploy everything**
+   ```bash
+   bun install
+   bun run alchemy.run.ts --stage production
+   ```
+
+That's it! Your chat app is live at `https://your-domain.com` 🎉
+
+### Local Development
+
+```bash
+bun install
+
+# Terminal 1: Frontend
+cd packages/app && bun run dev
+
+# Terminal 2: API
+cd packages/api && bunx wrangler dev
+```
+
+**Auth Setup for Development**
+
+By default, development mode uses `auth.chat.nuxflare.com` as the auth endpoint—you can keep using this for quick development.
+
+To use your own auth endpoint:
+
+- Deploy once with the production steps above
+- Update the auth URL in `packages/api/.dev.vars` to point to your deployment
+
+Alternatively, run the auth server locally:
+
+```bash
+# Terminal 3: Auth (optional)
+cd packages/auth && bunx wrangler dev
+```
+
+## 🏗️ Architecture
+
+**Edge-First Design**
+
+- **Frontend**: Nuxt 3 + Nuxt UI + Tailwind v4
+- **Backend**: Cloudflare Workers + Durable Objects + R2
+- **AI**: OpenRouter + Vercel AI SDK
+- **Auth**: OpenAuth.js compatible
+
+**Smart Client Coordination**
+
+Multiple tabs? No problem. We use web locks + service workers to ensure only one tab handles the WebSocket connection and database, then broadcasts updates to others. Saves bandwidth and prevents conflicts.
+
+**Durable Objects Magic**
+
+- `User DO`: Your personal data store, located close to you
+- `Stream DO`: Handles resumable AI response streams
+
+## 🛣️ What's Next
+
+We're just getting started. Coming soon:
+
+- 🔌 MCP servers integration
+- 👥 Teams and multi-user chats
+- 🤖 More agentic workflows
+- 🎛️ Custom model/provider management
+- ✨ Smoother animations and UX
+
+_Basically, if you see a cool feature in any chat app, let us know and we WILL start working on it._
+
+## 🤝 Contributing
+
+Found a bug? Have an idea? PRs and issues welcome! This started as a hackathon project but has grown into something the community can build on together.
+
+## 📄 License
+
+MIT - Go wild, build cool stuff.
+
+---
+
+_Made with ☕_
+
+## Performance marks (boot instrumentation)
+
+We instrument client boot to track time-to-interactive milestones:
+
+- app_start: when the client plugin initializes
+- shell_painted: shortly after first paint/next frame
+- first_click_ready: first user interaction after the shell is ready
+- heavy_deps_loaded: when markdown/db heavy modules finish loading (you can mark this from code)
+
+How to use:
+
+- Open DevTools → Console. On dev builds the app logs a compact table of marks and warns if budgets are exceeded.
+- From code, trigger the heavy mark after your heavy modules are initialized:
+
+```ts
+// anywhere in the Nuxt app after heavy subsystems are ready
+const { $perf } = useNuxtApp();
+$perf?.markHeavyDepsLoaded();
+
+// or dispatch a DOM event (alternative)
+window.dispatchEvent(new Event("perf:heavy_deps_loaded"));
+```
+
+Budgets (dev):
+
+- shell_painted ≤ 1500ms from app_start
+- heavy_deps_loaded ≤ 3000ms from app_start
 ````
 
 ## File: packages/app/app/components/Settings.vue
@@ -8168,281 +10119,128 @@ onBeforeUnmount(() => {
 </script>
 ````
 
-## File: packages/app/app/components/Sidebar.vue
-````vue
-<template>
-  <div
-    class="flex flex-col p-0 h-screen overflow-y-auto scrollbar-custom relative sidebar-bg"
-  >
-    <div class="sticky top-0 p-5 space-y-4 z-10 sidebar-bg">
-      <div class="w-full flex justify-between items-center">
-        <UButton
-          icon="i-lucide-panel-left"
-          variant="ghost"
-          @click="$emit('toggle')"
-        />
-
-        <div class="flex items-center gap-1">
-          <span class="text-lg font-bold text-neutral-500 dark:text-neutral-300"
-            >Nuxflare Chat</span
-          >
-        </div>
-
-        <UModal :overlay="false" v-model:open="searchRef">
-          <UButton icon="i-lucide-search" variant="ghost" />
-          <template #content>
-            <SearchBox />
-          </template>
-        </UModal>
-      </div>
-
-      <div>
-        <UButton
-          actions
-          @click="$emit('new')"
-          to="/"
-          variant="subtle"
-          block
-          size="xl"
-          >New Chat</UButton
-        >
-      </div>
-    </div>
-
-    <div class="space-y-4 p-5">
-      <ChatThread
-        v-if="pinnedThreadsFromStore.pinned?.length"
-        :threads="pinnedThreadsFromStore"
-        :pinned="true"
-      />
-      <ChatThread :threads="groupedThreadsFromStore" :pinned="false" />
-      <div class="h-10" />
-    </div>
-  </div>
-
-  <!-- account -->
-  <UPopover
-    @update:open="
-      (isOpen: boolean) => {
-        popperOpen = isOpen ? true : false;
-      }
-    "
-    class="sticky left-0 bottom-0 w-full z-10 sidebar-bg"
-    :open="popperOpen"
-  >
-    <div class="p-2 border-t border-neutral-300 dark:border-neutral-800">
-      <div
-        class="p-2.5 flex justify-between items-center hover:bg-white hover:dark:bg-primary-200/10 rounded-lg"
-        ref="pop"
-      >
-        <div class="space-x-2 flex items-center">
-          <UAvatar
-            :src="image"
-            size="xs"
-            :alt="name"
-            :ui="{ root: 'bg-primary-800/80', fallback: 'text-white/80' }"
-          />
-          <span
-            class="select-none text-sm font-medium text-neutral-800 dark:text-neutral-300"
-            >{{ name }}</span
-          >
-          <!-- OpenRouter logo + connection dot -->
-          <div class="flex items-center gap-2 ml-2">
-            <!-- small OpenRouter logo -->
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 512 512"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="currentColor"
-              stroke="currentColor"
-              class="text-neutral-500 dark:text-neutral-300"
-            >
-              <g clip-path="url(#clip0_205_3)">
-                <path
-                  d="M3 248.945C18 248.945 76 236 106 219C136 202 136 202 198 158C276.497 102.293 332 120.945 423 120.945"
-                  stroke-width="90"
-                />
-                <path d="M511 121.5L357.25 210.268L357.25 32.7324L511 121.5Z" />
-                <path
-                  d="M0 249C15 249 73 261.945 103 278.945C133 295.945 133 295.945 195 339.945C273.497 395.652 329 377 420 377"
-                  stroke-width="90"
-                />
-                <path
-                  d="M508 376.445L354.25 287.678L354.25 465.213L508 376.445Z"
-                />
-              </g>
-            </svg>
-            <span
-              :title="
-                openrouterConnected
-                  ? 'OpenRouter connected'
-                  : 'OpenRouter disconnected'
-              "
-              :class="[
-                'w-3 h-3 rounded-full inline-block',
-                openrouterConnected ? 'bg-green-500' : 'bg-red-500',
-              ]"
-              aria-hidden="true"
-            />
-          </div>
-        </div>
-
-        <UIcon
-          name="i-heroicons:chevron-up-down"
-          class="size-5 hover:text-black dark:hover:text-white"
-        />
-      </div>
-    </div>
-
-    <template #content>
-      <div
-        class="p-1 bg-white dark:bg-black rounded-lg w-[var(--width)]"
-        :style="cssVars"
-      >
-        <div
-          v-for="action in actions"
-          :key="action.icon"
-          class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800/70 font-semibold cursor-pointer"
-          @click="action.action()"
-        >
-          <UIcon :name="action.icon" class="size-4" />
-          <span>{{ action.name }}</span>
-        </div>
-      </div>
-    </template>
-  </UPopover>
-</template>
-
-<script setup lang="ts">
-import { useOpenRouterAuth } from "../composables/useOpenRouterAuth";
-const route = useRoute();
-const { searchRef } = useSearchRef();
-const { settingsRef } = useSettingsRef();
-const emit = defineEmits(["toggle", "new"]);
-const pop = useTemplateRef("pop");
-
-const user = ref({
-  user: {
-    name: "User",
-    image: "path/to/image.jpg",
+## File: packages/app/package.json
+````json
+{
+  "name": "@nuxflare-chat/app",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare"
   },
-});
-const name = computed(() => user.value.user?.name);
-const image = computed(() => user.value.user?.image);
-const { width } = useElementBounding(pop);
-const popperOpen = ref(false);
-
-const cssVars = computed(() => ({
-  "--width": `${width.value}px`,
-}));
-
-const { startLogin, logoutOpenRouter } = useOpenRouterAuth?.() || {
-  startLogin: () => {},
-  logoutOpenRouter: () => {},
-};
-
-const actions = computed(() => {
-  const base = [
-    {
-      icon: "i-lucide:settings",
-      name: "Settings",
-      action: () => {
-        settingsRef.value = true;
-        popperOpen.value = false;
-      },
-    },
-  ];
-  if (openrouterConnected.value) {
-    base.push({
-      icon: "i-heroicons-solid:logout",
-      name: "Logout",
-      action: async () => {
-        popperOpen.value = false;
-        try {
-          await logoutOpenRouter();
-        } catch (e) {
-          console.error(e);
-        }
-      },
-    });
-  } else {
-    base.push({
-      icon: "i-carbon:login",
-      name: "Login with OpenRouter",
-      action: async () => {
-        popperOpen.value = false;
-        // Avoid awaiting navigation to preserve user gesture on iOS Safari
-        try {
-          setTimeout(() => {
-            try {
-              startLogin();
-            } catch (e) {
-              console.error(e);
-            }
-          }, 0);
-        } catch (e) {
-          console.error(e);
-        }
-      },
-    });
-  }
-  return base;
-});
-
-const threadsStore = useThreadsStore();
-const {
-  pinnedThreads: pinnedThreadsFromStore,
-  unpinnedThreads: groupedThreadsFromStore,
-} = storeToRefs(threadsStore);
-
-const openrouterConnected = ref(false);
-
-async function checkOpenRouterKey() {
-  // Check fast client storage first
-  const localKey =
-    typeof window !== "undefined"
-      ? localStorage.getItem("openrouter_api_key")
-      : null;
-  if (localKey) {
-    openrouterConnected.value = true;
-    return;
-  }
-  // Then check synced KV
-  try {
-    const { $sync } = useNuxtApp();
-    const kvKey = await $sync.getKV("openrouter_api_key").catch(() => null);
-    openrouterConnected.value = !!kvKey;
-  } catch (e) {
-    openrouterConnected.value = false;
+  "dependencies": {
+    "@nuxflare-chat/api": "workspace:*",
+    "@nuxflare-chat/common": "workspace:*",
+    "@nuxt/fonts": "0.11.4",
+    "@nuxt/image": "^1.10.0",
+    "@nuxt/ui": "3.1.3",
+    "@pinia/nuxt": "0.11.1",
+    "@shikijs/rehype": "^3.7.0",
+    "@tailwindcss/typography": "^0.5.16",
+    "@unhead/vue": "^2.0.3",
+    "@vueuse/nuxt": "13.3.0",
+    "marked": "^16.0.0",
+    "nuxt": "3.17.5",
+    "nuxt-svgo": "4.0.17",
+    "nuxt-workers": "0.1.0",
+    "pinia": "^3.0.3",
+    "rehype-katex": "^7.0.1",
+    "rehype-stringify": "^10.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "typescript": "^5.6.3",
+    "unified": "^11.0.5",
+    "vue": "latest",
+    "vue3-spinners": "^1.3.1",
+    "wa-sqlite": "file:../wa-sqlite"
+  },
+  "devDependencies": {
+    "@iconify-json/carbon": "^1.2.10",
+    "@iconify-json/flat-color-icons": "^1.2.1",
+    "@iconify-json/heroicons": "^1.2.2",
+    "@iconify-json/lucide": "^1.2.53",
+    "@iconify-json/material-icon-theme": "^1.2.15",
+    "@iconify-json/material-symbols": "^1.2.28",
+    "@iconify-json/ri": "^1.2.5"
   }
 }
+````
 
-onMounted(() => {
-  checkOpenRouterKey();
-  if (typeof window !== "undefined") {
-    window.addEventListener("storage", (e) => {
-      if (e.key === "openrouter_api_key") checkOpenRouterKey();
-    });
-    // also react to our custom event fired on successful OAuth exchange
-    window.addEventListener("openrouter:connected", () => {
-      checkOpenRouterKey();
-    });
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") {
-        checkOpenRouterKey();
-      }
-    });
-  }
-});
-
-watch(
-  () => route.fullPath,
-  () => {
-    checkOpenRouterKey();
+## File: packages/app/nuxt.config.ts
+````typescript
+// https://nuxt.com/docs/api/configuration/nuxt-config
+export default defineNuxtConfig({
+  compatibilityDate: "2024-11-01",
+  devtools: { enabled: true },
+  future: {
+    compatibilityVersion: 4,
   },
-);
-</script>
+  build: {
+    transpile: ["wa-sqlite", "estree-walker"],
+  },
+  vite: {
+    optimizeDeps: {
+      exclude: ["wa-sqlite", "estree-walker"],
+    },
+  },
+  modules: [
+    "@nuxt/ui",
+    "@nuxt/fonts",
+    "@vueuse/nuxt",
+    "nuxt-svgo",
+    "@pinia/nuxt",
+    "nuxt-workers",
+  ],
+  app: {
+    head: {
+      link: [
+        // Preconnect to speed up CSS fetch
+        {
+          rel: "preconnect",
+          href: "https://cdn.jsdelivr.net",
+          crossorigin: "anonymous",
+        },
+        // Preload + swap to avoid render-blocking
+        {
+          rel: "preload",
+          as: "style",
+          href: "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css",
+          integrity:
+            "sha384-5TcZemv2l/9On385z///+d7MSYlvIEw9FuZTIdZ14vJLqWphw7e7ZPuOiCHJcFCP",
+          crossorigin: "anonymous",
+          onload: "this.onload=null;this.rel='stylesheet'",
+        },
+      ],
+    },
+  },
+  runtimeConfig: {
+    public: {
+      apiUrl: "http://localhost:8787",
+      authUrl: "https://auth.chat.nuxflare.com",
+      authClientID: "nuxflare-chat",
+      sessionInterval: 5 * 60 * 1000,
+      openRouterRedirectUri: process.env.OPENROUTER_REDIRECT_URI || "",
+      openRouterAuthUrl: process.env.OPENROUTER_AUTH_URL || "",
+      openRouterClientId: process.env.OPENROUTER_CLIENT_ID || "",
+    },
+    openRouterClientId: process.env.OPENROUTER_CLIENT_ID || "",
+    openRouterClientSecret: process.env.OPENROUTER_CLIENT_SECRET || "",
+    openRouterAuthUrl: process.env.OPENROUTER_AUTH_URL || "",
+    openRouterTokenUrl: process.env.OPENROUTER_TOKEN_URL || "",
+    openRouterUserinfoUrl: process.env.OPENROUTER_USERINFO_URL || "",
+  },
+  css: ["~/assets/css/main.css"],
+  svgo: {
+    componentPrefix: "icon",
+    autoImportPath: "~/assets/icons",
+  },
+});
 ````
 
 ## File: packages/app/app/components/chat/ChatMessage.client.vue
@@ -8493,7 +10291,7 @@ watch(
           class="max-w-[80%] flex p-3 rounded-lg ring-1 ring-primary-400/30 dark:ring-0 bg-primary-100/50 dark:bg-neutral-500/20"
         >
           <div class="flex flex-col text-md">
-            <MarkdownRenderer :content="message.content" />
+            <MarkdownRenderer :content="message.content || ''" variant="user" />
           </div>
         </div>
 
@@ -8749,121 +10547,338 @@ const confirmDelete = async () => {
   openDeleteModal.value = false;
 };
 </script>
+
+<script lang="ts">
+export default {};
+</script>
 ````
 
-## File: packages/app/nuxt.config.ts
-````typescript
-// https://nuxt.com/docs/api/configuration/nuxt-config
-export default defineNuxtConfig({
-  compatibilityDate: "2024-11-01",
-  devtools: { enabled: true },
-  future: {
-    compatibilityVersion: 4,
-  },
-  build: {
-    transpile: ["wa-sqlite", "estree-walker"],
-  },
-  vite: {
-    optimizeDeps: {
-      exclude: ["wa-sqlite", "estree-walker"],
-    },
-  },
-  modules: [
-    "@nuxt/ui",
-    "@nuxt/fonts",
-    "@vueuse/nuxt",
-    "nuxt-svgo",
-    "@pinia/nuxt",
-    "nuxt-workers",
-  ],
-  app: {
-    head: {
-      link: [
-        {
-          rel: "stylesheet",
-          href: "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css",
-          integrity:
-            "sha384-5TcZemv2l/9On385z///+d7MSYlvIEw9FuZTIdZ14vJLqWphw7e7ZPuOiCHJcFCP",
-          crossorigin: "anonymous",
-        },
-      ],
-    },
-  },
-  runtimeConfig: {
-    public: {
-      apiUrl: "http://localhost:8787",
-      authUrl: "https://auth.chat.nuxflare.com",
-      authClientID: "nuxflare-chat",
-      sessionInterval: 5 * 60 * 1000,
-      openRouterRedirectUri: process.env.OPENROUTER_REDIRECT_URI || "",
-      openRouterAuthUrl: process.env.OPENROUTER_AUTH_URL || "",
-      openRouterClientId: process.env.OPENROUTER_CLIENT_ID || "",
-    },
-    openRouterClientId: process.env.OPENROUTER_CLIENT_ID || "",
-    openRouterClientSecret: process.env.OPENROUTER_CLIENT_SECRET || "",
-    openRouterAuthUrl: process.env.OPENROUTER_AUTH_URL || "",
-    openRouterTokenUrl: process.env.OPENROUTER_TOKEN_URL || "",
-    openRouterUserinfoUrl: process.env.OPENROUTER_USERINFO_URL || "",
-  },
-  css: ["~/assets/css/main.css"],
-  svgo: {
-    componentPrefix: "icon",
-    autoImportPath: "~/assets/icons",
+## File: packages/app/app/components/Sidebar.vue
+````vue
+<template>
+  <div
+    class="flex flex-col p-0 h-screen overflow-y-auto scrollbar-custom relative sidebar-bg"
+  >
+    <div class="sticky top-0 p-5 space-y-4 z-10 sidebar-bg">
+      <div class="w-full flex justify-between items-center">
+        <UButton
+          icon="i-lucide-panel-left"
+          variant="ghost"
+          @click="$emit('toggle')"
+        />
+
+        <div class="flex items-center gap-1">
+          <span class="text-lg font-bold text-neutral-500 dark:text-neutral-300"
+            >Nuxflare Chat</span
+          >
+        </div>
+
+        <UModal :overlay="false" v-model:open="searchRef">
+          <UButton icon="i-lucide-search" variant="ghost" />
+          <template #content>
+            <SearchBox />
+          </template>
+        </UModal>
+      </div>
+
+      <div>
+        <UButton
+          actions
+          @click="$emit('new')"
+          to="/"
+          variant="subtle"
+          block
+          size="xl"
+          >New Chat</UButton
+        >
+      </div>
+    </div>
+
+    <div class="space-y-4 p-5">
+      <ChatThread
+        v-if="pinnedThreadsFromPreview.pinned?.length"
+        :threads="pinnedThreadsFromPreview"
+        :pinned="true"
+      />
+      <ChatThread :threads="groupedThreadsFromPreview" :pinned="false" />
+      <div class="h-10" />
+    </div>
+  </div>
+
+  <!-- account -->
+  <ClientOnly>
+    <UPopover
+      @update:open="
+        (isOpen: boolean) => {
+          popperOpen = isOpen ? true : false;
+        }
+      "
+      class="sticky left-0 bottom-0 w-full z-10 sidebar-bg"
+      :open="popperOpen"
+    >
+      <div class="p-2 border-t border-neutral-300 dark:border-neutral-800">
+        <div
+          class="p-2.5 flex justify-between items-center hover:bg-white hover:dark:bg-primary-200/10 rounded-lg"
+          ref="pop"
+        >
+          <div class="space-x-2 flex items-center">
+            <UAvatar
+              :src="image"
+              size="xs"
+              :alt="name"
+              :ui="{ root: 'bg-primary-800/80', fallback: 'text-white/80' }"
+            />
+            <span
+              class="select-none text-sm font-medium text-neutral-800 dark:text-neutral-300"
+              >{{ name }}</span
+            >
+            <!-- OpenRouter logo + connection dot -->
+            <div class="flex items-center gap-2 ml-2">
+              <!-- small OpenRouter logo -->
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 512 512"
+                xmlns="http://www.w3.org/2000/svg"
+                fill="currentColor"
+                stroke="currentColor"
+                class="text-neutral-500 dark:text-neutral-300"
+              >
+                <g clip-path="url(#clip0_205_3)">
+                  <path
+                    d="M3 248.945C18 248.945 76 236 106 219C136 202 136 202 198 158C276.497 102.293 332 120.945 423 120.945"
+                    stroke-width="90"
+                  />
+                  <path
+                    d="M511 121.5L357.25 210.268L357.25 32.7324L511 121.5Z"
+                  />
+                  <path
+                    d="M0 249C15 249 73 261.945 103 278.945C133 295.945 133 295.945 195 339.945C273.497 395.652 329 377 420 377"
+                    stroke-width="90"
+                  />
+                  <path
+                    d="M508 376.445L354.25 287.678L354.25 465.213L508 376.445Z"
+                  />
+                </g>
+              </svg>
+              <span
+                :title="
+                  openrouterConnected
+                    ? 'OpenRouter connected'
+                    : 'OpenRouter disconnected'
+                "
+                :class="[
+                  'w-3 h-3 rounded-full inline-block',
+                  openrouterConnected ? 'bg-green-500' : 'bg-red-500',
+                ]"
+                aria-hidden="true"
+              />
+            </div>
+          </div>
+
+          <UIcon
+            name="i-heroicons:chevron-up-down"
+            class="size-5 hover:text-black dark:hover:text-white"
+          />
+        </div>
+      </div>
+
+      <template #content>
+        <LazyAccountMenu :actions="actions" :cssVars="cssVars" />
+      </template>
+    </UPopover>
+    <template #fallback>
+      <AccountBarSkeleton />
+    </template>
+  </ClientOnly>
+</template>
+
+<script setup lang="ts">
+import { useOpenRouterAuth } from "../composables/useOpenRouterAuth";
+import { useThreadsPreview } from "../composables/useThreadsPreview";
+const route = useRoute();
+const { searchRef } = useSearchRef();
+const { settingsRef } = useSettingsRef();
+const emit = defineEmits(["toggle", "new"]);
+const pop = useTemplateRef("pop");
+
+const user = ref({
+  user: {
+    name: "User",
+    image: "path/to/image.jpg",
   },
 });
-````
+const name = computed(() => user.value.user?.name);
+const image = computed(() => user.value.user?.image);
+const { width } = useElementBounding(pop);
+const popperOpen = ref(false);
 
-## File: packages/app/package.json
-````json
-{
-  "name": "@nuxflare-chat/app",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "build": "nuxt build",
-    "dev": "nuxt dev",
-    "generate": "nuxt generate",
-    "preview": "nuxt preview",
-    "postinstall": "nuxt prepare"
-  },
-  "dependencies": {
-    "@nuxflare-chat/api": "workspace:*",
-    "@nuxflare-chat/common": "workspace:*",
-    "@nuxt/fonts": "0.11.4",
-    "@nuxt/image": "^1.10.0",
-    "@nuxt/ui": "3.1.3",
-    "@pinia/nuxt": "0.11.1",
-    "@shikijs/rehype": "^3.7.0",
-    "@tailwindcss/typography": "^0.5.16",
-    "@unhead/vue": "^2.0.3",
-    "@vueuse/nuxt": "13.3.0",
-    "marked": "^16.0.0",
-    "nuxt": "3.17.5",
-    "nuxt-svgo": "4.0.17",
-    "nuxt-workers": "0.1.0",
-    "pinia": "^3.0.3",
-    "rehype-katex": "^7.0.1",
-    "rehype-stringify": "^10.0.1",
-    "remark-gfm": "^4.0.1",
-    "remark-math": "^6.0.0",
-    "remark-parse": "^11.0.0",
-    "remark-rehype": "^11.1.2",
-    "typescript": "^5.6.3",
-    "unified": "^11.0.5",
-    "vue": "latest",
-    "vue3-spinners": "^1.3.1",
-    "wa-sqlite": "file:../wa-sqlite"
-  },
-  "devDependencies": {
-    "@iconify-json/carbon": "^1.2.10",
-    "@iconify-json/flat-color-icons": "^1.2.1",
-    "@iconify-json/heroicons": "^1.2.2",
-    "@iconify-json/lucide": "^1.2.53",
-    "@iconify-json/material-icon-theme": "^1.2.15",
-    "@iconify-json/material-symbols": "^1.2.28",
-    "@iconify-json/ri": "^1.2.5"
+const cssVars = computed(() => ({
+  "--width": `${width.value}px`,
+}));
+
+const { startLogin, logoutOpenRouter } = useOpenRouterAuth?.() || {
+  startLogin: () => {},
+  logoutOpenRouter: () => {},
+};
+
+const actions = computed(() => {
+  const base = [
+    {
+      icon: "i-lucide:settings",
+      name: "Settings",
+      action: () => {
+        settingsRef.value = true;
+        popperOpen.value = false;
+      },
+    },
+  ];
+  if (openrouterConnected.value) {
+    base.push({
+      icon: "i-heroicons-solid:logout",
+      name: "Logout",
+      action: async () => {
+        popperOpen.value = false;
+        try {
+          await logoutOpenRouter();
+        } catch (e) {
+          console.error(e);
+        }
+      },
+    });
+  } else {
+    base.push({
+      icon: "i-carbon:login",
+      name: "Login with OpenRouter",
+      action: async () => {
+        popperOpen.value = false;
+        // Avoid awaiting navigation to preserve user gesture on iOS Safari
+        try {
+          setTimeout(() => {
+            try {
+              startLogin();
+            } catch (e) {
+              console.error(e);
+            }
+          }, 0);
+        } catch (e) {
+          console.error(e);
+        }
+      },
+    });
+  }
+  return base;
+});
+
+// Preview-backed sidebar lists
+const { items } = useThreadsPreview();
+
+const getThreadTime = (t: any) =>
+  Math.max(t.last_message_at || 0, t.updated_at || 0);
+
+const pinnedThreadsFromPreview = computed(() => {
+  const result: Record<string, any[]> = { pinned: [] };
+  for (const t of items.value) {
+    if (t.pinned === 1 && t.deleted === 0) result.pinned!.push(t as any);
+  }
+  result.pinned!.sort((a, b) => getThreadTime(b) - getThreadTime(a));
+  return result;
+});
+
+const groupedThreadsFromPreview = computed(() => {
+  const now = Date.now();
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const sevenDaysAgo = new Date(today);
+  sevenDaysAgo.setDate(today.getDate() - 7);
+  const thirtyDaysAgo = new Date(today);
+  thirtyDaysAgo.setDate(today.getDate() - 30);
+
+  const groups: Record<string, any[]> = {
+    today: [],
+    yesterday: [],
+    "last 7 days": [],
+    "last 30 days": [],
+    older: [],
+  };
+
+  const unpinned = items.value
+    .filter((t) => t.pinned !== 1 && t.deleted === 0)
+    .slice()
+    .sort((a, b) => getThreadTime(b) - getThreadTime(a));
+
+  unpinned.forEach((t) => {
+    const d = new Date(t.last_message_at || 0);
+    if (d >= today) groups.today!.push(t as any);
+    else if (d >= yesterday) groups.yesterday!.push(t as any);
+    else if (d >= sevenDaysAgo) groups["last 7 days"]!.push(t as any);
+    else if (d >= thirtyDaysAgo) groups["last 30 days"]!.push(t as any);
+    else groups.older!.push(t as any);
+  });
+
+  for (const k of Object.keys(groups)) {
+    if (groups[k]!.length === 0) delete groups[k];
+  }
+  return groups;
+});
+
+const openrouterConnected = ref(false);
+
+async function checkOpenRouterKey() {
+  // Check fast client storage first
+  const localKey =
+    typeof window !== "undefined"
+      ? localStorage.getItem("openrouter_api_key")
+      : null;
+  if (localKey) {
+    openrouterConnected.value = true;
+    return;
+  }
+  // Then check synced KV
+  try {
+    const { $sync } = useNuxtApp();
+    const kvKey = await $sync.getKV("openrouter_api_key").catch(() => null);
+    openrouterConnected.value = !!kvKey;
+  } catch (e) {
+    openrouterConnected.value = false;
   }
 }
+
+onMounted(() => {
+  checkOpenRouterKey();
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", (e) => {
+      if (e.key === "openrouter_api_key") checkOpenRouterKey();
+    });
+    // also react to our custom event fired on successful OAuth exchange
+    window.addEventListener("openrouter:connected", () => {
+      checkOpenRouterKey();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        checkOpenRouterKey();
+      }
+    });
+  }
+});
+
+watch(
+  () => route.fullPath,
+  () => {
+    checkOpenRouterKey();
+  },
+);
+</script>
+
+<script lang="ts">
+export default {
+  components: {
+    AccountBarSkeleton: () => import("./AccountBarSkeleton.vue"),
+  },
+};
+</script>
 ````
 
 ## File: packages/app/app/plugins/sync.client.ts
@@ -9485,6 +11500,7 @@ const scrollToBottom = () => {
 ## File: packages/app/app/utils/sync-service.ts
 ````typescript
 import type { Thread } from "../composables/useThreadsStore";
+import { useThreadsPreview } from "../composables/useThreadsPreview";
 import { uuidv4 } from "~/utils/uuid";
 import type { PushEvent } from "@nuxflare-chat/api/types";
 import showToast from "./showToast";
@@ -9506,6 +11522,22 @@ function waitForSync(): Promise<void> {
   return new Promise((resolve) => {
     syncReadyResolvers.push(resolve);
   });
+}
+
+// Debounced preview invalidation to coalesce many small updates
+let _invalidateTimer: any = null;
+function schedulePreviewInvalidation(delay = 50) {
+  if (_invalidateTimer) return;
+  _invalidateTimer = setTimeout(() => {
+    _invalidateTimer = null;
+    try {
+      const { invalidateAll } = useThreadsPreview();
+      // fire and forget; SWR composable will refresh in background
+      void invalidateAll();
+    } catch (e) {
+      console.warn("preview invalidation failed", e);
+    }
+  }, delay);
 }
 
 const sanitizeFtsTerm = (term: string): string => {
@@ -9630,6 +11662,7 @@ export function syncServiceProvider() {
             payload: updatedThread,
           });
         }
+        schedulePreviewInvalidation();
       }
     } else if (msg.type === "message" && msg.data) {
       const backendMessage = msg.data;
@@ -9691,6 +11724,7 @@ export function syncServiceProvider() {
           });
           messageChannel.close();
         }
+        schedulePreviewInvalidation();
       }
     } else if (msg.type === "kv" && msg.data) {
       const backendKV = msg.data;

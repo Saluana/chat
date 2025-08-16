@@ -29,8 +29,8 @@ artifact_id: 0b2f7c3a-7c10-4c3a-9c9b-7b1a3c3d6c42
 
 ## 5. Lazy wa-sqlite/db initialization
 
-- [ ] Create `utils/db-facade.ts` to gate dynamic import('wa-sqlite'); export `init()` and `getThreadsPreview()` returning cached preview from localStorage on first call. Requirements: 2.
-- [ ] Hydrate preview cache whenever sidebar successfully loads threads; write to localStorage for future fast boots. Requirements: 2.
+- [x] Create `utils/db-facade.ts` to gate dynamic import('wa-sqlite'); export `init()` and `getThreadsPreview()` returning cached preview from localStorage on first call. Requirements: 2.
+- [x] Hydrate preview cache whenever sidebar successfully loads threads; write to localStorage for future fast boots. Requirements: 2.
 
 ## 6. Vite/Nuxt build tuning
 
