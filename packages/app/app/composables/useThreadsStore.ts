@@ -47,17 +47,29 @@ export const useThreadsStore = defineStore("threads", () => {
   );
 
   function addMessage(msg: any) {
+    // Debug: record when an individual message is added
+    try {
+      console.log(
+        "[ThreadsDebug] addMessage: id=",
+        msg?.id,
+        "thread_id=",
+        msg?.thread_id,
+      );
+    } catch {}
     messages.value[msg.id as string] = msg;
   }
 
   const messagesList = computed(() =>
-    Object.values(messages.value).toSorted((a, b) => {
-      // Sort by index first, then by created_at as a safety net
-      if (a.index !== b.index) {
-        return (a.index || 0) - (b.index || 0);
-      }
-      return a.created_at - b.created_at;
-    }),
+    // Avoid using the new `toSorted` API for broader runtime compatibility.
+    Object.values(messages.value)
+      .slice()
+      .sort((a, b) => {
+        // Sort by index first, then by created_at as a safety net
+        if ((a.index || 0) !== (b.index || 0)) {
+          return (a.index || 0) - (b.index || 0);
+        }
+        return a.created_at - b.created_at;
+      }),
   );
 
   const pinnedThreads = computed(() => {
@@ -121,30 +133,77 @@ export const useThreadsStore = defineStore("threads", () => {
   let messagesChannel: BroadcastChannel | null = null;
   function setActiveThread(threadId: string | null) {
     if (import.meta.client) {
+      console.log(
+        "[ThreadsDebug] setActiveThread called with:",
+        threadId,
+        "(previous active=",
+        activeThread.value,
+        ")",
+      );
+      // If the active thread is already the requested one, avoid clearing and recreating channels.
+      if (activeThread.value === threadId) {
+        console.log(
+          "[ThreadsDebug] setActiveThread: same thread requested, skipping re-init",
+        );
+        return;
+      }
       activeThread.value = threadId;
       messages.value = {};
+      console.log("[ThreadsDebug] messages cleared for new active thread");
       if (threadId) {
         const { $sync } = useNuxtApp();
         (async () => {
           try {
+            console.log(
+              "[ThreadsDebug] fetching messages for thread",
+              threadId,
+            );
             const msgs = ((await $sync.getMessagesForThread?.(threadId)) ??
               []) as any[];
+            console.log(
+              "[ThreadsDebug] fetched messages for thread",
+              threadId,
+              "count=",
+              Array.isArray(msgs) ? msgs.length : typeof msgs,
+            );
             if (Array.isArray(msgs)) {
               msgs.forEach((msg) => (messages.value[msg.id] = msg));
             }
+            // Log final message keys count
+            try {
+              console.log(
+                "[ThreadsDebug] messages populated, local count=",
+                Object.keys(messages.value).length,
+              );
+            } catch {}
           } catch (e) {
             console.error("Failed to load messages for thread", threadId, e);
           }
         })();
       }
       if (messagesChannel) {
+        console.log("[ThreadsDebug] closing previous messagesChannel");
         messagesChannel.close();
       }
       messagesChannel = new BroadcastChannel(`messages-channel-${threadId}`);
+      console.log(
+        "[ThreadsDebug] created messagesChannel=",
+        `messages-channel-${threadId}`,
+      );
       messagesChannel.onmessage = (
         event: MessageEvent<{ type: string; payload: any }>,
       ) => {
         const { type, payload } = event.data;
+        console.log(
+          "[ThreadsDebug] messagesChannel.onmessage: type=",
+          type,
+          "payload.id=",
+          payload?.id,
+          "payload.thread_id=",
+          payload?.thread_id,
+          "active=",
+          activeThread.value,
+        );
         if (type === "message_update") {
           if (payload.thread_id !== activeThread.value) return;
           if (payload.deleted) delete messages.value[payload.id];

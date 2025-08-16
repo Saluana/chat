@@ -113,8 +113,8 @@
           :style="{ paddingBottom: `${chatPromptHeight + 24}px` }"
         >
           <ChatMessage
-            v-for="(message, index) in messagesList"
-            :key="index"
+            v-for="message in messagesList"
+            :key="message.id"
             :message="message"
             @retryMessage="() => retryMessage(message.id)"
             @branchThread="() => branchThread(message.id)"

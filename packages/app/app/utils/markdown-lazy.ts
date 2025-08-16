@@ -8,7 +8,13 @@ let workerStatus: "idle" | "base" | "heavy" | "failed" = "idle";
 let baseNoMathLocal: Promise<any> | null = null;
 let baseWithMathLocal: Promise<any> | null = null;
 let enhancedLocal: Promise<any> | null = null;
+// In-memory cache for rendered chunks. Keep this bounded to avoid OOM.
 const chunkCache = new Map<string, string>();
+const CHUNK_CACHE_LIMIT = 500; // max number of cached chunks
+
+// Worker idle shutdown to free memory when unused
+let workerIdleTimer: any = null;
+const WORKER_IDLE_MS = 60_000; // 60s of inactivity
 const processingQueue = new Map<string, Promise<string>>();
 
 async function markHeavyDepsReady() {
@@ -242,7 +248,9 @@ export async function renderMarkdownChunk(chunk: string): Promise<string> {
         }
       };
       worker!.addEventListener("message", onMsg as any);
+      resetWorkerIdleTimer();
       worker!.postMessage({ type: "render", id, text: chunk });
+      resetWorkerIdleTimer();
     }).catch(async (err) => {
       // Fallback to in-thread processing on worker failure
       console.warn("[markdown-worker] render failed, using fallback", err);
@@ -290,10 +298,41 @@ export async function renderMarkdownChunk(chunk: string): Promise<string> {
     }
   }
 
+  function resetWorkerIdleTimer() {
+    try {
+      if (!worker) return;
+      if (workerIdleTimer) clearTimeout(workerIdleTimer);
+      workerIdleTimer = setTimeout(() => {
+        try {
+          worker?.terminate();
+        } catch {}
+        worker = null;
+        workerStatus = "idle";
+        // clear any heavy local processors to free memory if possible
+        enhancedLocal = null;
+        baseWithMathLocal = null;
+      }, WORKER_IDLE_MS);
+    } catch {}
+  }
+
   processingQueue.set(hash, p);
   const result = await p;
   processingQueue.delete(hash);
+  // Insert into cache and enforce LRU limit
   chunkCache.set(hash, result);
+  try {
+    if (chunkCache.size > CHUNK_CACHE_LIMIT) {
+      // Evict oldest entries (Map preserves insertion order)
+      const toRemove = chunkCache.size - CHUNK_CACHE_LIMIT;
+      const it = chunkCache.keys();
+      for (let i = 0; i < toRemove; i++) {
+        const k = it.next().value as string;
+        chunkCache.delete(k);
+      }
+    }
+  } catch (e) {
+    console.warn("[markdown-lazy] cache eviction failed", e);
+  }
   return result;
 }
 

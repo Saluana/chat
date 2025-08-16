@@ -313,8 +313,16 @@ export class SharedService extends EventTarget {
 
       // Configure the port.
       providerPort.addEventListener("message", ({ data }) => {
-        const callbacks = this.providerCallbacks.get(data.nonce);
-        if (!data.error) {
+        const callbacks = this.providerCallbacks.get(data?.nonce);
+        if (!callbacks) {
+          // No waiting callback for this nonce. Log and ignore.
+          console.warn(
+            "SharedService: received response for unknown nonce",
+            data?.nonce,
+          );
+          return;
+        }
+        if (!data?.error) {
           callbacks.resolve(data.result);
         } else {
           callbacks.reject(Object.assign(new Error(), data.error));
@@ -332,9 +340,23 @@ export class SharedService extends EventTarget {
   }
 
   #closeProviderPort(providerPort) {
-    providerPort.then((port) => port?.close());
+    if (!providerPort) return;
+    // providerPort might be a Promise or a direct port.
+    try {
+      if (typeof providerPort.then === "function") {
+        providerPort.then((port) => port?.close());
+      } else {
+        providerPort?.close?.();
+      }
+    } catch (e) {
+      console.warn("SharedService: error closing providerPort", e);
+    }
     for (const { reject } of this.providerCallbacks.values()) {
-      reject(new Error("SharedService provider change"));
+      try {
+        reject(new Error("SharedService provider change"));
+      } catch (e) {
+        // ignore individual reject errors
+      }
     }
   }
 
@@ -349,9 +371,20 @@ export class SharedService extends EventTarget {
             const nonce = randomString();
 
             const providerPort = await this.#providerPort;
+            if (!providerPort) {
+              // Fail fast when no provider is available instead of hanging.
+              throw new Error("SharedService: no provider available");
+            }
+
             return new Promise((resolve, reject) => {
               this.providerCallbacks.set(nonce, { resolve, reject });
-              providerPort?.postMessage({ nonce, method, args });
+              try {
+                providerPort.postMessage({ nonce, method, args });
+              } catch (e) {
+                // If postMessage fails, clean up and reject.
+                this.providerCallbacks.delete(nonce);
+                return reject(e);
+              }
             }).finally(() => {
               this.providerCallbacks.delete(nonce);
             });

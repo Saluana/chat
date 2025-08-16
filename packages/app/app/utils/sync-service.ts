@@ -11,6 +11,10 @@ let _clock = 0;
 let messageQueue: any[] = [];
 let isQueuePaused = false;
 const QUEUE_PROCESSING_INTERVAL = 10;
+// Cap message queue to prevent unbounded growth
+const MAX_MESSAGE_QUEUE = 20000;
+const DIAGNOSTICS_INTERVAL = 30_000;
+let diagnosticsInterval: any = null;
 
 let syncReadyResolvers: Array<() => void> = [];
 let isSyncReady = false;
@@ -274,6 +278,17 @@ export function syncServiceProvider() {
       QUEUE_PROCESSING_INTERVAL,
     );
   }
+
+  function trimMessageQueue() {
+    if (messageQueue.length > MAX_MESSAGE_QUEUE) {
+      const removeCount = messageQueue.length - MAX_MESSAGE_QUEUE;
+      // drop the oldest messages first
+      messageQueue.splice(0, removeCount);
+      console.warn(
+        `[sync-service] messageQueue trimmed ${removeCount} items; new length=${messageQueue.length}`,
+      );
+    }
+  }
   async function processMessageQueue() {
     if (messageQueueTimeout) clearTimeout(messageQueueTimeout);
     while (messageQueue.length > 0 && !isQueuePaused) {
@@ -319,6 +334,8 @@ export function syncServiceProvider() {
         try {
           const msg = JSON.parse(event.data as string);
           messageQueue.push(msg);
+          // Ensure queue stays bounded in case of bursts or slow processing
+          trimMessageQueue();
           startMessageQueue();
         } catch (e) {
           console.error(
@@ -330,6 +347,27 @@ export function syncServiceProvider() {
       },
     });
     wsSendFunction = send;
+    // start diagnostics interval if not running
+    if (!diagnosticsInterval) {
+      diagnosticsInterval = setInterval(() => {
+        try {
+          const qLen = messageQueue.length;
+          // @ts-ignore - optional process.memoryUsage in some runtimes
+          const mem =
+            typeof process !== "undefined" && process.memoryUsage
+              ? process.memoryUsage()
+              : null;
+          console.log(
+            "[sync-diagnostics] messageQueueLength=",
+            qLen,
+            "memory=",
+            mem,
+          );
+        } catch (e) {
+          console.warn("[sync-diagnostics] failed to collect diagnostics", e);
+        }
+      }, DIAGNOSTICS_INTERVAL);
+    }
   }
 
   async function pullChanges() {

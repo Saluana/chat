@@ -1059,55 +1059,6 @@ withDefaults(defineProps<{ variant?: "user" | "assistant" }>(), {
 </script>
 ````
 
-## File: packages/app/app/components/ThreadLists.client.vue
-````vue
-<template>
-  <ClientOnly>
-    <div ref="root" class="min-h-[200px]">
-      <ThreadListSkeleton v-if="!visible" />
-      <template v-else>
-        <LazyChatThread
-          v-if="pinned?.pinned?.length"
-          :threads="pinned"
-          :pinned="true"
-        />
-        <LazyChatThread :threads="unpinned" :pinned="false" />
-        <div class="h-10" />
-      </template>
-    </div>
-  </ClientOnly>
-</template>
-
-<script setup lang="ts">
-import { useIntersectionObserver } from "@vueuse/core";
-const props = defineProps<{ pinned: any; unpinned: any }>();
-const root = ref<HTMLElement | null>(null);
-const visible = ref(false);
-
-onMounted(() => {
-  const { stop } = useIntersectionObserver(
-    root,
-    ([entry]) => {
-      if (!entry) return;
-      if (entry.isIntersecting) {
-        visible.value = true;
-        stop();
-      }
-    },
-    { rootMargin: "200px 0px", threshold: 0.01 },
-  );
-});
-</script>
-
-<script lang="ts">
-export default {
-  components: {
-    ThreadListSkeleton: () => import("./ThreadListSkeleton.vue"),
-  },
-};
-</script>
-````
-
 ## File: packages/app/app/components/ThreadLists.vue
 ````vue
 <template>
@@ -4944,6 +4895,110 @@ const obj = computed(() => {
 </script>
 ````
 
+## File: packages/app/app/components/ThreadLists.client.vue
+````vue
+<template>
+  <ClientOnly>
+    <div ref="root" class="min-h-[200px]">
+      <ThreadListSkeleton v-if="!visible" />
+      <template v-else>
+        <LazyChatThread
+          v-if="pinnedThreads.pinned?.length"
+          :threads="pinnedThreads"
+          :pinned="true"
+        />
+        <LazyChatThread :threads="unpinnedGroups" :pinned="false" />
+        <div class="h-10" />
+      </template>
+    </div>
+  </ClientOnly>
+</template>
+
+<script setup lang="ts">
+import { useIntersectionObserver } from "@vueuse/core";
+import { useThreadsPreview } from "../composables/useThreadsPreview";
+// No props now; the component owns preview state when visible
+const root = ref<HTMLElement | null>(null);
+const visible = ref(false);
+const { items, init } = useThreadsPreview();
+
+const getThreadTime = (t: any) =>
+  Math.max(t.last_message_at || 0, t.updated_at || 0);
+
+const pinnedThreads = computed(() => {
+  const result: Record<string, any[]> = { pinned: [] };
+  for (const t of items.value) {
+    if (t.pinned === 1 && t.deleted === 0) result.pinned!.push(t as any);
+  }
+  result.pinned!.sort((a, b) => getThreadTime(b) - getThreadTime(a));
+  return result;
+});
+
+const unpinnedGroups = computed(() => {
+  const now = Date.now();
+  const today = new Date(now);
+  today.setHours(0, 0, 0, 0);
+  const yesterday = new Date(today);
+  yesterday.setDate(today.getDate() - 1);
+  const sevenDaysAgo = new Date(today);
+  sevenDaysAgo.setDate(today.getDate() - 7);
+  const thirtyDaysAgo = new Date(today);
+  thirtyDaysAgo.setDate(today.getDate() - 30);
+
+  const groups: Record<string, any[]> = {
+    today: [],
+    yesterday: [],
+    "last 7 days": [],
+    "last 30 days": [],
+    older: [],
+  };
+
+  const unpinned = items.value
+    .filter((t) => t.pinned !== 1 && t.deleted === 0)
+    .slice()
+    .sort((a, b) => getThreadTime(b) - getThreadTime(a));
+
+  unpinned.forEach((t) => {
+    const d = new Date(t.last_message_at || 0);
+    if (d >= today) groups.today!.push(t as any);
+    else if (d >= yesterday) groups.yesterday!.push(t as any);
+    else if (d >= sevenDaysAgo) groups["last 7 days"]!.push(t as any);
+    else if (d >= thirtyDaysAgo) groups["last 30 days"]!.push(t as any);
+    else groups.older!.push(t as any);
+  });
+
+  for (const k of Object.keys(groups)) {
+    if (groups[k]!.length === 0) delete groups[k];
+  }
+  return groups;
+});
+
+onMounted(() => {
+  const { stop } = useIntersectionObserver(
+    root,
+    ([entry]) => {
+      if (!entry) return;
+      if (entry.isIntersecting) {
+        visible.value = true;
+        // Only initialize preview once visible
+        init().catch(() => {});
+        stop();
+      }
+    },
+    { rootMargin: "200px 0px", threshold: 0.01 },
+  );
+});
+</script>
+
+<script lang="ts">
+export default {
+  components: {
+    ThreadListSkeleton: () => import("./ThreadListSkeleton.vue"),
+  },
+};
+</script>
+````
+
 ## File: packages/app/app/composables/useOpenRouterAuth.ts
 ````typescript
 import { ref } from "vue";
@@ -5752,80 +5807,6 @@ const confirmDelete = () => {
 </script>
 ````
 
-## File: packages/app/app/components/ReasoningBudget.vue
-````vue
-<template>
-  <USelectMenu
-    v-model="selectedBudget"
-    :icon="selectedBudget?.icon"
-    :trailing-icon="false"
-    :searchInput="false"
-    color="neutral"
-    variant="subtle"
-    :items="budgets"
-    :ui="{
-      base: 'min-w-fit inline-flex justify-center text-xs rounded-full cursor-pointer font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white light:hover:bg-neutral-200 dark:hover:bg-neutral-700/70',
-      content: 'min-w-40 p-0 dark:bg-black',
-      item: 'text-neutral-700 dark:text-neutral-400 data-highlighted:bg-neutral-100 dark:data-highlighted:bg-neutral-800 rounded-md',
-      leading: 'w-auto mx-auto flex items-center justify-between',
-      leadingIcon:
-        'font-normal dark:text-neutral-400 dark:hover:text-white text-neutral-600 hover:text-neutral-800',
-    }"
-  />
-</template>
-
-<script setup lang="ts">
-const budgets = ref([
-  {
-    label: "High",
-    value: "High",
-    icon: "i-uil:brain",
-    action: () => {},
-  },
-  {
-    label: "Medium",
-    value: "Medium",
-    icon: "i-lucide:brain",
-    action: () => {},
-  },
-  {
-    label: "Low",
-    value: "Low",
-    icon: "i-bx:brain",
-    action: () => {},
-  },
-]);
-
-const promptStore = usePromptStore();
-const { thinkingBudget } = storeToRefs(promptStore);
-const selectedBudget = ref(
-  budgets.value.find(
-    (b) => b.value.toLowerCase() === thinkingBudget.value.toLowerCase(),
-  ),
-);
-
-watch(
-  thinkingBudget,
-  () => {
-    selectedBudget.value = budgets.value.find(
-      (b) => b.value.toLowerCase() === thinkingBudget.value.toLowerCase(),
-    );
-  },
-  { immediate: true },
-);
-
-watch(
-  selectedBudget,
-  (newBudget) => {
-    if (newBudget) {
-      promptStore.thinkingBudget = newBudget.value.toLowerCase();
-    }
-  },
-  { immediate: true },
-);
-</script>
-````
-
 ## File: packages/app/app/components/SearchBox.client.vue
 ````vue
 <template>
@@ -5950,402 +5931,6 @@ const onSelect = (item: any) => {
 //     searchRef.value = !searchRef.value;
 //   },
 // });
-</script>
-````
-
-## File: packages/app/app/composables/useThreadsPreview.ts
-````typescript
-import { ref, shallowRef } from "vue";
-import { useNuxtApp } from "#app";
-import {
-  PreviewCache,
-  PREVIEW_CACHE_VERSION,
-  versionKeyFor,
-  type PreviewEnvelope,
-  type ThreadPreview,
-} from "../utils/preview-cache";
-
-// Singleton state to ensure one source of truth across imports
-const items = shallowRef<ThreadPreview[]>([]);
-const ready = ref(false);
-const isStale = ref(false);
-let initialized = false;
-let refreshing: Promise<void> | null = null;
-
-const versionKey = versionKeyFor(PREVIEW_CACHE_VERSION);
-
-function mark(name: string) {
-  try {
-    // Prefer perf plugin if available (centralized reporting/budgets)
-    const nuxt = useNuxtApp();
-    const perf = nuxt.$perf as { mark?: (n: string) => void } | undefined;
-    if (perf && typeof perf.mark === "function") {
-      perf.mark(name);
-      return;
-    }
-  } catch {
-    // fall through to performance API
-  }
-  try {
-    if (typeof performance !== "undefined" && performance.mark) {
-      performance.mark(name);
-    }
-  } catch {
-    /* no-op */
-  }
-}
-
-function sanitizeSnippet(s: string): string {
-  if (!s) return "";
-  // cheap sanitize: collapse whitespace and strip code fences/markdown symbols
-  return String(s)
-    .replace(/```[\s\S]*?```/g, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-async function readCacheOnce() {
-  const start = import.meta.dev ? performance.now() : 0;
-  const envelope = await PreviewCache.get(versionKey);
-  if (envelope && Array.isArray(envelope.items)) {
-    items.value = envelope.items;
-  } else {
-    items.value = [];
-  }
-  mark("preview_cache_read");
-  if (import.meta.dev) {
-    // eslint-disable-next-line no-console
-    console.debug(
-      "[threads-preview] cache read in",
-      (performance.now() - start).toFixed(1),
-      "ms; items:",
-      items.value.length,
-    );
-  }
-  ready.value = true;
-}
-
-async function doRefresh(force = false) {
-  if (refreshing && !force) return refreshing;
-  refreshing = (async () => {
-    const t0 = import.meta.dev ? performance.now() : 0;
-    isStale.value = true;
-    try {
-      // Ensure DB warms up off critical path (nuxt-workers global)
-      await initDatabase();
-      // Mirror a readiness mark on the client timeline for centralized reporting
-      mark("db_worker_ready");
-      // Query directly via dbExec to avoid export mismatch issues
-      const sql = `
-        SELECT
-          t.id,
-          t.title,
-          t.updated_at,
-          t.last_message_at,
-          t.pinned,
-          t.deleted,
-          SUBSTR(COALESCE((
-            SELECT m2.content
-            FROM messages m2
-            WHERE m2.thread_id = t.id AND m2.deleted = 0
-            ORDER BY m2.created_at DESC, m2.message_index DESC
-            LIMIT 1
-          ), ''), 1, 140) AS last_message_snippet,
-          (
-            SELECT COUNT(1)
-            FROM messages m3
-            WHERE m3.thread_id = t.id AND m3.deleted = 0
-          ) AS message_count
-        FROM threads t
-        WHERE t.deleted = 0
-        ORDER BY t.pinned DESC, t.last_message_at DESC, t.updated_at DESC;
-      `;
-      const res = await dbExec({ sql, bindings: null as any });
-      const previews: ThreadPreview[] = (res.rows || []).map((row: any[]) => {
-        const [
-          id,
-          title,
-          updated_at,
-          last_message_at,
-          pinned,
-          deleted,
-          last_message_snippet,
-          message_count,
-        ] = row;
-        return {
-          id: String(id),
-          title: String(title ?? ""),
-          updated_at: Number(updated_at ?? 0),
-          last_message_at: Number(last_message_at ?? 0),
-          pinned: Number(pinned ?? 0) as 0 | 1,
-          deleted: Number(deleted ?? 0) as 0 | 1,
-          last_message_snippet: String(last_message_snippet ?? ""),
-          message_count: Number(message_count ?? 0),
-        } as ThreadPreview;
-      });
-      const mapped: ThreadPreview[] = previews.map((p) => ({
-        ...p,
-        last_message_snippet: sanitizeSnippet(p.last_message_snippet || ""),
-      }));
-
-      const envelope: PreviewEnvelope = {
-        version: PREVIEW_CACHE_VERSION,
-        generated_at: Date.now(),
-        items: mapped,
-      };
-
-      await PreviewCache.set(versionKey, envelope);
-      // Atomic swap
-      items.value = mapped;
-      mark("preview_refresh_done");
-      if (import.meta.dev) {
-        // eslint-disable-next-line no-console
-        console.debug(
-          "[threads-preview] refresh done in",
-          (performance.now() - t0).toFixed(1),
-          "ms; items:",
-          items.value.length,
-        );
-      }
-    } catch (err) {
-      if (import.meta.dev) {
-        // eslint-disable-next-line no-console
-        console.warn("[threads-preview] refresh failed", err);
-      }
-      // Keep stale data; optional retry can be scheduled by caller
-    } finally {
-      isStale.value = false;
-      refreshing = null;
-    }
-  })();
-  return refreshing;
-}
-
-async function invalidateAll() {
-  await PreviewCache.clearAll();
-  return doRefresh(true);
-}
-
-export function useThreadsPreview() {
-  if (!initialized) {
-    initialized = true;
-    // First touch: load cache immediately and kick refresh
-    // Fire and forget; callers can await ready/isStale as needed
-    readCacheOnce();
-    doRefresh(false);
-  }
-
-  return {
-    items,
-    isStale,
-    ready,
-    refresh: (opts?: { force?: boolean }) => doRefresh(!!opts?.force),
-    invalidateAll,
-    // Best-effort patch: updates an item locally without forcing a full refresh
-    upsertPreview: (partial: Partial<ThreadPreview> & { id: string }) => {
-      const idx = items.value.findIndex((t) => t.id === partial.id);
-      if (idx >= 0) {
-        const merged = { ...items.value[idx], ...partial } as ThreadPreview;
-        const next = items.value.slice();
-        next[idx] = merged;
-        // resort if time fields or pinned changed
-        next.sort(
-          (a, b) =>
-            (b.pinned as number) - (a.pinned as number) ||
-            (b.last_message_at || 0) - (a.last_message_at || 0) ||
-            (b.updated_at || 0) - (a.updated_at || 0),
-        );
-        items.value = next;
-      }
-    },
-  };
-}
-````
-
-## File: packages/app/app/layouts/chat.vue
-````vue
-<template>
-  <div class="w-screen h-screen scrollbar-custom">
-    <div class="hidden lg:block w-full h-full" v-if="isServer || isLargeScreen">
-      <SplitterGroup direction="horizontal" @layout="splitterLayout = $event">
-        <SplitterPanel
-          ref="desktopSidebarPanelRef"
-          as="aside"
-          @resize="handleDesktopSidebarResize"
-          :default-size="splitterLayout?.[0] ?? targetDesktopSidebarSize"
-          :max-size="50"
-          class="z-[20] border-neutral-300 dark:border-neutral-800 bg-neutral-200/50 dark:bg-neutral-950/30 overflow-hidden"
-          :class="[isDesktopSidebarOpen && 'border-r']"
-        >
-          <Sidebar @toggle="toggleDesktopSidebar" />
-        </SplitterPanel>
-        <SplitterResizeHandle v-if="isDesktopSidebarOpen" />
-        <SplitterPanel
-          :default-size="splitterLayout?.[1] ?? 100 - targetDesktopSidebarSize"
-          as="main"
-          class="bg-neutral-50 dark:bg-neutral-900"
-        >
-          <NuxtPage />
-        </SplitterPanel>
-      </SplitterGroup>
-    </div>
-
-    <div class="block lg:hidden" v-if="isServer || !isLargeScreen">
-      <USlideover
-        side="left"
-        title="Sidebar"
-        description="Browse chats"
-        v-model:open="isMobileSidebarOpen"
-      >
-        <template #content>
-          <Sidebar
-            @toggle="isMobileSidebarOpen = false"
-            @new="isMobileSidebarOpen = false"
-          />
-        </template>
-      </USlideover>
-    </div>
-
-    <main
-      class="h-full block lg:hidden bg-neutral-200/50 dark:bg-neutral-900"
-      v-if="isServer || !isLargeScreen"
-    >
-      <NuxtPage />
-    </main>
-
-    <!-- Floating Action Buttons (Top Left) -->
-    <ClientOnly>
-      <div
-        v-if="isLargeScreen && !isDesktopSidebarOpen"
-        class="hidden lg:flex absolute top-4 left-4 floating-actions"
-      >
-        <UButton
-          icon="i-lucide-panel-left"
-          variant="ghost"
-          color="neutral"
-          @click="toggleDesktopSidebar()"
-        />
-        <UModal :overlay="false" v-model:open="searchRef">
-          <UButton icon="i-lucide-search" variant="ghost" color="neutral" />
-          <template #content>
-            <SearchBox />
-          </template>
-        </UModal>
-        <UButton icon="i-lucide-plus" variant="soft" to="/chat" />
-      </div>
-    </ClientOnly>
-
-    <div
-      v-if="isServer || !isLargeScreen"
-      class="flex lg:hidden absolute z-[10] top-4 left-4 floating-actions"
-    >
-      <UButton
-        icon="i-lucide-panel-left"
-        variant="ghost"
-        color="neutral"
-        @click="isMobileSidebarOpen = true"
-      />
-      <UModal :overlay="false" v-model:open="searchRef">
-        <UButton icon="i-lucide-search" variant="ghost" color="neutral" />
-        <template #content>
-          <SearchBox />
-        </template>
-      </UModal>
-      <UButton icon="i-lucide-plus" variant="soft" to="/chat" />
-    </div>
-
-    <!-- Floating actions (Top Right) -->
-    <div class="absolute z-[10] top-4 right-4 floating-actions">
-      <ColorModeToggle />
-      <UModal
-        :overlay="false"
-        v-model:open="settingsRef"
-        :ui="{
-          content: 'bg-transparent w-auto max-w-none mx-auto',
-        }"
-      >
-        <UTooltip text="Settings">
-          <UButton icon="lucide:settings-2" variant="ghost" color="neutral" />
-        </UTooltip>
-        <template #content>
-          <Settings />
-        </template>
-      </UModal>
-    </div>
-  </div>
-</template>
-
-<script setup lang="ts">
-const { settingsRef } = useSettingsRef();
-const { searchRef } = useSearchRef();
-import { SplitterGroup, SplitterPanel, SplitterResizeHandle } from "reka-ui";
-import { TransitionPresets, breakpointsTailwind } from "@vueuse/core";
-
-// Constants
-const DEFAULT_SIDEBAR_SIZE = 20;
-const MIN_SIDEBAR_SIZE = computed(() => (isLargeScreen.value ? 15 : 20));
-
-// State
-const isServer = import.meta.server;
-const breakpoints = useBreakpoints(breakpointsTailwind);
-const isLargeScreen = breakpoints.greater("lg");
-const splitterLayout = useCookie<number[]>("splitterLayout");
-const desktopSidebarPanelRef = ref<typeof SplitterPanel | null>(null);
-const lastDesktopSidebarSize = ref(
-  splitterLayout.value?.[0] ?? DEFAULT_SIDEBAR_SIZE,
-);
-const targetDesktopSidebarSize = ref(lastDesktopSidebarSize.value);
-const isDesktopSidebarOpen = ref(targetDesktopSidebarSize.value > 0);
-const isMobileSidebarOpen = ref(false);
-const isTransitioning = ref(false);
-
-// Animated State
-const animatedDesktopSidebarSize = useTransition(targetDesktopSidebarSize, {
-  duration: 100,
-  transition: TransitionPresets.easeInOutCubic,
-  onStarted: () => (isTransitioning.value = true),
-  onFinished: () => (isTransitioning.value = false),
-});
-
-// Resize the sidebar panel whenever the size animates
-watch(animatedDesktopSidebarSize, (newSize) => {
-  nextTick(() => {
-    desktopSidebarPanelRef.value?.resize(newSize);
-  });
-});
-
-const toggleDesktopSidebar = () => {
-  if (isDesktopSidebarOpen.value) {
-    // Closing
-    isDesktopSidebarOpen.value = false;
-    const currentSize = desktopSidebarPanelRef.value?.getSize();
-    if (currentSize && currentSize > 0) {
-      // Store the last known open size only if it was actually open
-      lastDesktopSidebarSize.value = currentSize;
-    }
-    targetDesktopSidebarSize.value = 0;
-  } else {
-    // Opening
-    isDesktopSidebarOpen.value = true;
-    // Restore to last size, or default if last size was 0 or undefined
-    targetDesktopSidebarSize.value =
-      lastDesktopSidebarSize.value > 0
-        ? lastDesktopSidebarSize.value
-        : DEFAULT_SIDEBAR_SIZE;
-  }
-};
-
-const handleDesktopSidebarResize = (size: number) => {
-  // Prevent collapsing below min size during manual resize when open
-  if (
-    !isTransitioning.value &&
-    isDesktopSidebarOpen.value &&
-    size < MIN_SIDEBAR_SIZE.value &&
-    desktopSidebarPanelRef.value
-  ) {
-    desktopSidebarPanelRef.value.resize(MIN_SIDEBAR_SIZE.value);
-  }
-};
 </script>
 ````
 
@@ -6726,48 +6311,6 @@ watch(
 </script>
 ````
 
-## File: packages/app/app/components/MarkdownChunkRenderer.client.vue
-````vue
-<template>
-  <div>
-    <div v-if="!ready" class="py-2">
-      <MarkdownSkeleton :variant="variant" />
-    </div>
-    <div v-else v-html="html" />
-  </div>
-</template>
-
-<script setup lang="ts">
-const { block, variant } = withDefaults(
-  defineProps<{ block: string; variant?: "user" | "assistant" }>(),
-  { variant: "assistant" },
-);
-const emit = defineEmits(["ready"]);
-const html = ref("");
-const ready = ref(false);
-// Lazy renderer
-const { renderMarkdownChunk } = await import("~/utils/markdown-lazy");
-
-watch(
-  [() => block],
-  async () => {
-    if (block) {
-      ready.value = false;
-      html.value = await renderMarkdownChunk(block);
-      ready.value = true;
-      emit("ready");
-    }
-  },
-  { immediate: true },
-);
-</script>
-<script lang="ts">
-export default {
-  components: { MarkdownSkeleton: () => import("./MarkdownSkeleton.vue") },
-};
-</script>
-````
-
 ## File: packages/app/app/components/Reasoning.vue
 ````vue
 <template>
@@ -6810,61 +6353,506 @@ onMounted(() => {
 </script>
 ````
 
-## File: planning/perf-boot/tasks.md
-````markdown
----
-artifact_id: 0b2f7c3a-7c10-4c3a-9c9b-7b1a3c3d6c42
----
+## File: packages/app/app/components/ReasoningBudget.vue
+````vue
+<template>
+  <USelectMenu
+    v-model="selectedBudget"
+    :icon="selectedBudget?.icon"
+    :searchInput="false"
+    color="neutral"
+    variant="subtle"
+    :items="budgets"
+    :ui="{
+      base: 'min-w-fit inline-flex justify-center text-xs rounded-full cursor-pointer font-medium text-neutral-700 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white light:hover:bg-neutral-200 dark:hover:bg-neutral-700/70',
+      content: 'min-w-40 p-0 dark:bg-black',
+      item: 'text-neutral-700 dark:text-neutral-400 data-highlighted:bg-neutral-100 dark:data-highlighted:bg-neutral-800 rounded-md',
+      leading: 'w-auto mx-auto flex items-center justify-between',
+      leadingIcon:
+        'font-normal dark:text-neutral-400 dark:hover:text-white text-neutral-600 hover:text-neutral-800',
+    }"
+  />
+</template>
 
-# tasks.md
+<script setup lang="ts">
+const budgets = ref([
+  {
+    label: "High",
+    value: "High",
+    icon: "i-uil:brain",
+    action: () => {},
+  },
+  {
+    label: "Medium",
+    value: "Medium",
+    icon: "i-lucide:brain",
+    action: () => {},
+  },
+  {
+    label: "Low",
+    value: "Low",
+    icon: "i-bx:brain",
+    action: () => {},
+  },
+]);
 
-## 1. Instrument boot and define budgets
+const promptStore = usePromptStore();
+const { thinkingBudget } = storeToRefs(promptStore);
+const selectedBudget = ref(
+  budgets.value.find(
+    (b) => b.value.toLowerCase() === thinkingBudget.value.toLowerCase(),
+  ),
+);
 
-- [x] Add client plugin `plugins/perf.client.ts` with performance marks: app_start (immediate), shell_painted (after mount/nextTick), first_click_ready (set after first interaction hook), heavy_deps_loaded (after markdown/db workers ready). Requirements: 5.
-- [x] Add a simple console reporter in dev only. Requirements: 5.
-- [x] Create docs snippet in README for interpreting marks. Requirements: 5.
+watch(
+  thinkingBudget,
+  () => {
+    selectedBudget.value = budgets.value.find(
+      (b) => b.value.toLowerCase() === thinkingBudget.value.toLowerCase(),
+    );
+  },
+  { immediate: true },
+);
 
-## 2. Remove render-blocking KaTeX CSS
+watch(
+  selectedBudget,
+  (newBudget) => {
+    if (newBudget) {
+      promptStore.thinkingBudget = newBudget.value.toLowerCase();
+    }
+  },
+  { immediate: true },
+);
+</script>
+````
 
-- [x] Replace nuxt.config.ts head.link stylesheet with: preconnect + preload + on-demand injection script, or media="print" swap technique. Requirements: 3.
-- [x] Verify math renders post-load in AssistantMessage markdown flow. Requirements: 6.
+## File: packages/app/app/composables/useThreadsPreview.ts
+````typescript
+import { ref, shallowRef } from "vue";
+import { useNuxtApp } from "#app";
+import {
+  PreviewCache,
+  PREVIEW_CACHE_VERSION,
+  versionKeyFor,
+  type PreviewEnvelope,
+  type ThreadPreview,
+} from "../utils/preview-cache";
 
-## 3. Defer Markdown pipeline
+// Singleton state to ensure one source of truth across imports
+const items = shallowRef<ThreadPreview[]>([]);
+const ready = ref(false);
+const isStale = ref(false);
+let initialized = false;
+let refreshing: Promise<void> | null = null;
+let pendingInvalidate = false; // set when invalidations occur before init
 
-- [x] Delete warmup call in `app/app.vue` that calls `processMarkdownChunk("# test")`. Requirements: 2.
-- [x] Create `utils/markdown-lazy.ts` that dynamically imports unified stack; export `render()` with internal singleton. Requirements: 2.
-- [x] Update `MarkdownRenderer.vue` and `MarkdownChunkRenderer.client.vue` (if present) to call lazy renderer; show plain text fallback until ready. Requirements: 1,2,6.
-- [x] Optional: move to a Web Worker if chunk size > threshold (phase 2). Requirements: 2.
+const versionKey = versionKeyFor(PREVIEW_CACHE_VERSION);
 
-## 4. Progressive hydration of Sidebar/ThreadList
+function mark(name: string) {
+  try {
+    // Prefer perf plugin if available (centralized reporting/budgets)
+    const nuxt = useNuxtApp();
+    const perf = nuxt.$perf as { mark?: (n: string) => void } | undefined;
+    if (perf && typeof perf.mark === "function") {
+      perf.mark(name);
+      return;
+    }
+  } catch {
+    // fall through to performance API
+  }
+  try {
+    if (typeof performance !== "undefined" && performance.mark) {
+      performance.mark(name);
+    }
+  } catch {
+    /* no-op */
+  }
+}
 
-- [ ] Wrap `Sidebar.vue` in a lightweight shell that renders header + New Chat instantly; lazy-load the thread lists using `defineAsyncComponent` or `ClientOnly` with `when-visible` sentinel. Requirements: 1,4.
-- [x] Defer expensive icon sets and popovers until hover/focus (use dynamic import for popover content). Requirements: 4.
+function sanitizeSnippet(s: string): string {
+  if (!s) return "";
+  // cheap sanitize: collapse whitespace and strip code fences/markdown symbols
+  return String(s)
+    .replace(/```[\s\S]*?```/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
-## 5. Lazy wa-sqlite/db initialization
+async function readCacheOnce() {
+  const start = import.meta.dev ? performance.now() : 0;
+  const envelope = await PreviewCache.get(versionKey);
+  if (envelope && Array.isArray(envelope.items)) {
+    items.value = envelope.items;
+  } else {
+    items.value = [];
+  }
+  mark("preview_cache_read");
+  if (import.meta.dev) {
+    // eslint-disable-next-line no-console
+    console.debug(
+      "[threads-preview] cache read in",
+      (performance.now() - start).toFixed(1),
+      "ms; items:",
+      items.value.length,
+    );
+  }
+  ready.value = true;
+}
 
-- [x] Create `utils/db-facade.ts` to gate dynamic import('wa-sqlite'); export `init()` and `getThreadsPreview()` returning cached preview from localStorage on first call. Requirements: 2.
-- [x] Hydrate preview cache whenever sidebar successfully loads threads; write to localStorage for future fast boots. Requirements: 2.
+async function doRefresh(force = false) {
+  if (!initialized) {
+    // Defer heavy work until explicitly initialized by the visible list
+    if (force) pendingInvalidate = true;
+    return;
+  }
+  if (refreshing && !force) return refreshing;
+  refreshing = (async () => {
+    const t0 = import.meta.dev ? performance.now() : 0;
+    isStale.value = true;
+    try {
+      // Ensure DB warms up off critical path (nuxt-workers global)
+      await initDatabase();
+      // Mirror a readiness mark on the client timeline for centralized reporting
+      mark("db_worker_ready");
+      // Query directly via dbExec to avoid export mismatch issues
+      const sql = `
+        SELECT
+          t.id,
+          t.title,
+          t.updated_at,
+          t.last_message_at,
+          t.pinned,
+          t.deleted,
+          SUBSTR(COALESCE((
+            SELECT m2.content
+            FROM messages m2
+            WHERE m2.thread_id = t.id AND m2.deleted = 0
+            ORDER BY m2.created_at DESC, m2.message_index DESC
+            LIMIT 1
+          ), ''), 1, 140) AS last_message_snippet,
+          (
+            SELECT COUNT(1)
+            FROM messages m3
+            WHERE m3.thread_id = t.id AND m3.deleted = 0
+          ) AS message_count
+        FROM threads t
+        WHERE t.deleted = 0
+        ORDER BY t.pinned DESC, t.last_message_at DESC, t.updated_at DESC;
+      `;
+      const res = await dbExec({ sql, bindings: null as any });
+      const previews: ThreadPreview[] = (res.rows || []).map((row: any[]) => {
+        const [
+          id,
+          title,
+          updated_at,
+          last_message_at,
+          pinned,
+          deleted,
+          last_message_snippet,
+          message_count,
+        ] = row;
+        return {
+          id: String(id),
+          title: String(title ?? ""),
+          updated_at: Number(updated_at ?? 0),
+          last_message_at: Number(last_message_at ?? 0),
+          pinned: Number(pinned ?? 0) as 0 | 1,
+          deleted: Number(deleted ?? 0) as 0 | 1,
+          last_message_snippet: String(last_message_snippet ?? ""),
+          message_count: Number(message_count ?? 0),
+        } as ThreadPreview;
+      });
+      const mapped: ThreadPreview[] = previews.map((p) => ({
+        ...p,
+        last_message_snippet: sanitizeSnippet(p.last_message_snippet || ""),
+      }));
 
-## 6. Vite/Nuxt build tuning
+      const envelope: PreviewEnvelope = {
+        version: PREVIEW_CACHE_VERSION,
+        generated_at: Date.now(),
+        items: mapped,
+      };
 
-- [ ] Re-evaluate `transpile`/`optimizeDeps` for wa-sqlite and estree-walker to minimize dev-time bundling overhead; only transpile if necessary. Requirements: 1,2.
-- [ ] Enable route-level code splitting where possible (ensure pages/[[id]].vue is standalone). Requirements: 1.
+      await PreviewCache.set(versionKey, envelope);
+      // Atomic swap
+      items.value = mapped;
+      mark("preview_refresh_done");
+      if (import.meta.dev) {
+        // eslint-disable-next-line no-console
+        console.debug(
+          "[threads-preview] refresh done in",
+          (performance.now() - t0).toFixed(1),
+          "ms; items:",
+          items.value.length,
+        );
+      }
+    } catch (err) {
+      if (import.meta.dev) {
+        // eslint-disable-next-line no-console
+        console.warn("[threads-preview] refresh failed", err);
+      }
+      // Keep stale data; optional retry can be scheduled by caller
+    } finally {
+      isStale.value = false;
+      refreshing = null;
+    }
+  })();
+  return refreshing;
+}
 
-## 7. QA and perf verification
+async function invalidateAll() {
+  await PreviewCache.clearAll();
+  // If not initialized yet, mark for refresh later
+  if (!initialized) {
+    pendingInvalidate = true;
+    return;
+  }
+  return doRefresh(true);
+}
 
-- [ ] Add a minimal Lighthouse CI script or manual instructions to measure TTI/FCP/BTI locally. Requirements: 5.
-- [ ] Validate p95 budgets on cold and warm loads; capture numbers in a short perf report in PR. Requirements: 1,5.
+export function useThreadsPreview() {
+  return {
+    items,
+    isStale,
+    ready,
+    refresh: (opts?: { force?: boolean }) => doRefresh(!!opts?.force),
+    invalidateAll,
+    init: async () => {
+      if (initialized) return;
+      initialized = true;
+      await readCacheOnce();
+      if (pendingInvalidate) {
+        pendingInvalidate = false;
+        await doRefresh(true);
+      } else {
+        await doRefresh(false);
+      }
+    },
+    // Best-effort patch: updates an item locally without forcing a full refresh
+    upsertPreview: (partial: Partial<ThreadPreview> & { id: string }) => {
+      const idx = items.value.findIndex((t) => t.id === partial.id);
+      if (idx >= 0) {
+        const merged = { ...items.value[idx], ...partial } as ThreadPreview;
+        const next = items.value.slice();
+        next[idx] = merged;
+        // resort if time fields or pinned changed
+        next.sort(
+          (a, b) =>
+            (b.pinned as number) - (a.pinned as number) ||
+            (b.last_message_at || 0) - (a.last_message_at || 0) ||
+            (b.updated_at || 0) - (a.updated_at || 0),
+        );
+        items.value = next;
+      }
+    },
+  };
+}
+````
 
-## 8. Safeguards and regressions
+## File: packages/app/app/layouts/chat.vue
+````vue
+<template>
+  <div class="w-screen h-screen scrollbar-custom">
+    <ClientOnly>
+      <template #fallback>
+        <main class="h-full block bg-neutral-50 dark:bg-neutral-900">
+          <NuxtPage />
+        </main>
+      </template>
+      <div class="hidden lg:block w-full h-full" v-if="isLargeScreen">
+        <SplitterGroup direction="horizontal" @layout="splitterLayout = $event">
+          <SplitterPanel
+            ref="desktopSidebarPanelRef"
+            as="aside"
+            @resize="handleDesktopSidebarResize"
+            :default-size="splitterLayout?.[0] ?? targetDesktopSidebarSize"
+            :max-size="50"
+            class="z-[20] border-neutral-300 dark:border-neutral-800 bg-neutral-200/50 dark:bg-neutral-950/30 overflow-hidden"
+            :class="[isDesktopSidebarOpen && 'border-r']"
+          >
+            <Sidebar @toggle="toggleDesktopSidebar" />
+          </SplitterPanel>
+          <SplitterResizeHandle v-if="isDesktopSidebarOpen" />
+          <SplitterPanel
+            :default-size="
+              splitterLayout?.[1] ?? 100 - targetDesktopSidebarSize
+            "
+            as="main"
+            class="bg-neutral-50 dark:bg-neutral-900"
+          >
+            <NuxtPage />
+          </SplitterPanel>
+        </SplitterGroup>
+      </div>
 
-- [ ] Add unit tests for lazy loaders; smoke test markdown with math and code blocks. Requirements: 6.
-- [ ] Add fallback for `requestIdleCallback` using `setTimeout`. Requirements: 2.
+      <div class="block lg:hidden" v-if="!isLargeScreen">
+        <USlideover
+          side="left"
+          title="Sidebar"
+          description="Browse chats"
+          v-model:open="isMobileSidebarOpen"
+        >
+          <template #content>
+            <Sidebar
+              @toggle="isMobileSidebarOpen = false"
+              @new="isMobileSidebarOpen = false"
+            />
+          </template>
+        </USlideover>
+      </div>
+    </ClientOnly>
 
-## Notes / Phase 2 (optional)
+    <!-- Floating Action Buttons (Top Left) -->
+    <ClientOnly>
+      <div
+        v-if="isLargeScreen && !isDesktopSidebarOpen"
+        class="hidden lg:flex absolute top-4 left-4 floating-actions"
+      >
+        <UButton
+          icon="i-lucide-panel-left"
+          variant="ghost"
+          color="neutral"
+          @click="toggleDesktopSidebar()"
+        />
+        <UModal :overlay="false" v-model:open="searchRef">
+          <UButton icon="i-lucide-search" variant="ghost" color="neutral" />
+          <template #content>
+            <SearchBox />
+          </template>
+        </UModal>
+        <UButton icon="i-lucide-plus" variant="soft" to="/chat" />
+      </div>
+    </ClientOnly>
 
-- Worker-ize markdown processing for long documents, and stream tokens directly into renderer.
-- Cache KaTeX CSS integrity-verified locally and ship with app to remove third-party fetch.
+    <ClientOnly>
+      <template #fallback>
+        <div
+          class="flex lg:hidden absolute z-[10] top-4 left-4 floating-actions"
+        >
+          <UButton icon="i-lucide-panel-left" variant="ghost" color="neutral" />
+          <UModal :overlay="false" v-model:open="searchRef">
+            <UButton icon="i-lucide-search" variant="ghost" color="neutral" />
+            <template #content>
+              <SearchBox />
+            </template>
+          </UModal>
+          <UButton icon="i-lucide-plus" variant="soft" to="/chat" />
+        </div>
+      </template>
+
+      <div
+        v-if="!isLargeScreen"
+        class="flex lg:hidden absolute z-[10] top-4 left-4 floating-actions"
+      >
+        <UButton
+          icon="i-lucide-panel-left"
+          variant="ghost"
+          color="neutral"
+          @click="isMobileSidebarOpen = true"
+        />
+        <UModal :overlay="false" v-model:open="searchRef">
+          <UButton icon="i-lucide-search" variant="ghost" color="neutral" />
+          <template #content>
+            <SearchBox />
+          </template>
+        </UModal>
+        <UButton icon="i-lucide-plus" variant="soft" to="/chat" />
+      </div>
+    </ClientOnly>
+
+    <!-- Floating actions (Top Right) -->
+    <div class="absolute z-[10] top-4 right-4 floating-actions">
+      <ColorModeToggle />
+      <UModal
+        :overlay="false"
+        v-model:open="settingsRef"
+        :ui="{
+          content: 'bg-transparent w-auto max-w-none mx-auto',
+        }"
+      >
+        <UTooltip text="Settings">
+          <UButton icon="lucide:settings-2" variant="ghost" color="neutral" />
+        </UTooltip>
+        <template #content>
+          <Settings />
+        </template>
+      </UModal>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+const { settingsRef } = useSettingsRef();
+const { searchRef } = useSearchRef();
+import { SplitterGroup, SplitterPanel, SplitterResizeHandle } from "reka-ui";
+import { TransitionPresets, breakpointsTailwind } from "@vueuse/core";
+
+// Constants
+const DEFAULT_SIDEBAR_SIZE = 20;
+const MIN_SIDEBAR_SIZE = computed(() => (isLargeScreen.value ? 15 : 20));
+
+// State
+const isServer = import.meta.server;
+const breakpoints = useBreakpoints(breakpointsTailwind);
+const isLargeScreen = breakpoints.greater("lg");
+const splitterLayout = useCookie<number[]>("splitterLayout");
+const desktopSidebarPanelRef = ref<typeof SplitterPanel | null>(null);
+const lastDesktopSidebarSize = ref(
+  splitterLayout.value?.[0] ?? DEFAULT_SIDEBAR_SIZE,
+);
+const targetDesktopSidebarSize = ref(lastDesktopSidebarSize.value);
+const isDesktopSidebarOpen = ref(targetDesktopSidebarSize.value > 0);
+const isMobileSidebarOpen = ref(false);
+const isTransitioning = ref(false);
+
+// Animated State
+const animatedDesktopSidebarSize = useTransition(targetDesktopSidebarSize, {
+  duration: 100,
+  transition: TransitionPresets.easeInOutCubic,
+  onStarted: () => (isTransitioning.value = true),
+  onFinished: () => (isTransitioning.value = false),
+});
+
+// Resize the sidebar panel whenever the size animates
+watch(animatedDesktopSidebarSize, (newSize) => {
+  nextTick(() => {
+    desktopSidebarPanelRef.value?.resize(newSize);
+  });
+});
+
+const toggleDesktopSidebar = () => {
+  if (isDesktopSidebarOpen.value) {
+    // Closing
+    isDesktopSidebarOpen.value = false;
+    const currentSize = desktopSidebarPanelRef.value?.getSize();
+    if (currentSize && currentSize > 0) {
+      // Store the last known open size only if it was actually open
+      lastDesktopSidebarSize.value = currentSize;
+    }
+    targetDesktopSidebarSize.value = 0;
+  } else {
+    // Opening
+    isDesktopSidebarOpen.value = true;
+    // Restore to last size, or default if last size was 0 or undefined
+    targetDesktopSidebarSize.value =
+      lastDesktopSidebarSize.value > 0
+        ? lastDesktopSidebarSize.value
+        : DEFAULT_SIDEBAR_SIZE;
+  }
+};
+
+const handleDesktopSidebarResize = (size: number) => {
+  // Prevent collapsing below min size during manual resize when open
+  if (
+    !isTransitioning.value &&
+    isDesktopSidebarOpen.value &&
+    size < MIN_SIDEBAR_SIZE.value &&
+    desktopSidebarPanelRef.value
+  ) {
+    desktopSidebarPanelRef.value.resize(MIN_SIDEBAR_SIZE.value);
+  }
+};
+</script>
 ````
 
 ## File: package.json
@@ -7287,6 +7275,48 @@ const toggleWebSearch = () => {
 </script>
 ````
 
+## File: packages/app/app/components/MarkdownChunkRenderer.client.vue
+````vue
+<template>
+  <div>
+    <div v-if="!ready" class="py-2">
+      <MarkdownSkeleton :variant="variant" />
+    </div>
+    <div v-else v-html="html" />
+  </div>
+</template>
+
+<script setup lang="ts">
+const { block, variant = "assistant" } = defineProps<{
+  block: string;
+  variant?: "user" | "assistant";
+}>();
+const emit = defineEmits(["ready"]);
+const html = ref("");
+const ready = ref(false);
+// Lazy renderer
+const { renderMarkdownChunk } = await import("~/utils/markdown-lazy");
+
+watch(
+  [() => block],
+  async () => {
+    if (block) {
+      ready.value = false;
+      html.value = await renderMarkdownChunk(block);
+      ready.value = true;
+      emit("ready");
+    }
+  },
+  { immediate: true },
+);
+</script>
+<script lang="ts">
+export default {
+  components: { MarkdownSkeleton: () => import("./MarkdownSkeleton.vue") },
+};
+</script>
+````
+
 ## File: packages/app/app/composables/useModelStore.ts
 ````typescript
 import modelsService, {
@@ -7582,248 +7612,61 @@ export const useModelStore = defineStore("model", () => {
 });
 ````
 
-## File: packages/app/app/components/ChatThread.vue
-````vue
-<template>
-  <div v-for="(threads, category) in threads" :key="category" class="space-y-1">
-    <h3
-      class="mb-2 flex items-center gap-1 text-xs uppercase font-semibold tracking-wide"
-      :class="[
-        category.toLowerCase() === 'pinned'
-          ? 'text-primary-600/80 dark:text-primary-400/80'
-          : 'text-neutral-700 dark:text-neutral-300',
-      ]"
-    >
-      <UIcon
-        v-if="category.toLowerCase() === 'pinned'"
-        name="i-codicon:pinned"
-        class="size-3.5"
-      />
-      {{ category }}
-    </h3>
-    <div
-      v-for="thread in threads"
-      :key="thread.id"
-      @click="switchThread(thread)"
-      class="p-1.5 rounded-lg hover:bg-white dark:hover:bg-neutral-800 cursor-pointer group overflow-hidden"
-      :class="[
-        popperThreadId === thread.id || activeThread === thread.id
-          ? 'bg-white dark:bg-neutral-800'
-          : '',
-      ]"
-    >
-      <div class="flex justify-start gap-2 items-center relative">
-        <UIcon
-          v-if="thread.parent_thread_id"
-          name="i-carbon:branch"
-          class="size-3.5"
-        />
-        <span
-          v-if="editableThreadId != thread.id"
-          class="text-sm font-medium text-neutral-500 dark:text-neutral-400 truncate"
-          @dblclick="editThread(thread)"
-          :title="thread.title"
-        >
-          {{ thread.title }}
-        </span>
-        <UInput
-          v-if="editableThreadId === thread.id"
-          :id="`thread-input-${thread.id}`"
-          v-model="thread.title"
-          class="w-full"
-          :ui="{
-            base: 'truncate p-0 pb-0.5 ring-0 focus-visible:ring-0 border-b border-b-neutral-600/50 rounded-none bg-transparent',
-          }"
-          @blur="saveThread(thread)"
-          @keydown.enter="saveThread(thread)"
-        />
+## File: planning/perf-boot/tasks.md
+````markdown
+---
+artifact_id: 0b2f7c3a-7c10-4c3a-9c9b-7b1a3c3d6c42
+---
 
-        <div
-          @click.stop
-          class="h-full absolute right-0 pl-3 pr-0.5 gap-1 flex items-center group-hover:translate-x-1 rounded-lg transition-transform duration-100 bg-[linear-gradient(to_right,_transparent_0%,_white_20%,_white_100%)] dark:bg-[linear-gradient(to_right,_transparent_0%,_#262626_20%,_#262626_100%)]"
-          :class="[
-            popperThreadId === thread.id
-              ? 'transform translate-x-1'
-              : 'transform translate-x-[120%]',
-          ]"
-        >
-          <UTooltip
-            :disableHoverableContent="true"
-            :text="pinned ? unpinnedAction.tooltip : pinnedAction.tooltip"
-          >
-            <UButton
-              :icon="pinned ? unpinnedAction.icon : pinnedAction.icon"
-              variant="ghost"
-              color="neutral"
-              size="xs"
-              class="dark:hover:bg-neutral-700/70 rounded-md flex items-center"
-              @click="
-                pinned
-                  ? unpinnedAction.action(thread.id)
-                  : pinnedAction.action(thread.id)
-              "
-            />
-          </UTooltip>
+# tasks.md
 
-          <UPopover
-            @update:open="
-              (isOpen: boolean) => (popperThreadId = isOpen ? thread.id : null)
-            "
-            :open="popperThreadId === thread.id"
-          >
-            <UButton
-              :icon="moreOptionsAction.icon"
-              variant="ghost"
-              color="neutral"
-              size="xs"
-              :title="popperThreadId"
-              class="dark:hover:bg-neutral-700/70 rounded-md flex items-center"
-              :class="[
-                popperThreadId === thread.id ? 'dark:bg-neutral-700/70' : '',
-              ]"
-            />
-            <template #content>
-              <LazyThreadMenu :moreActions="moreActions" :thread="thread" />
-            </template>
-          </UPopover>
-        </div>
-      </div>
-    </div>
-  </div>
+## 1. Instrument boot and define budgets
 
-  <DeleteModal
-    v-model="openDeleteModal"
-    :thread="threadToDelete"
-    @cancelDelete="cancelDelete"
-    @confirmDelete="confirmDelete"
-  />
-</template>
+- [x] Add client plugin `plugins/perf.client.ts` with performance marks: app_start (immediate), shell_painted (after mount/nextTick), first_click_ready (set after first interaction hook), heavy_deps_loaded (after markdown/db workers ready). Requirements: 5.
+- [x] Add a simple console reporter in dev only. Requirements: 5.
+- [x] Create docs snippet in README for interpreting marks. Requirements: 5.
 
-<script setup lang="ts">
-const props = defineProps({
-  threads: {
-    type: Object,
-    default: () => {},
-  },
-  pinned: {
-    type: Boolean,
-    default: false,
-  },
-});
-const threadsStore = useThreadsStore();
-const popperThreadId = ref<number | null>(null);
-const { activeThread } = storeToRefs(threadsStore);
-const { $sync } = useNuxtApp();
+## 2. Remove render-blocking KaTeX CSS
 
-function switchThread(thread: any) {
-  navigateTo(`/${thread.id}`);
-}
+- [x] Replace nuxt.config.ts head.link stylesheet with: preconnect + preload + on-demand injection script, or media="print" swap technique. Requirements: 3.
+- [x] Verify math renders post-load in AssistantMessage markdown flow. Requirements: 6.
 
-const editableThreadId = ref<number | null>(null);
-const editThread = (thread: any) => {
-  editableThreadId.value = thread.id;
-  requestAnimationFrame(() => {
-    const input = document.getElementById(`thread-input-${thread.id}`);
-    input?.focus();
-  });
-};
+## 3. Defer Markdown pipeline
 
-const saveThread = (thread: any) => {
-  editableThreadId.value = null;
-  $sync.updateThread(thread.id, { title: thread.title });
-};
+- [x] Delete warmup call in `app/app.vue` that calls `processMarkdownChunk("# test")`. Requirements: 2.
+- [x] Create `utils/markdown-lazy.ts` that dynamically imports unified stack; export `render()` with internal singleton. Requirements: 2.
+- [x] Update `MarkdownRenderer.vue` and `MarkdownChunkRenderer.client.vue` (if present) to call lazy renderer; show plain text fallback until ready. Requirements: 1,2,6.
+- [x] Optional: move to a Web Worker if chunk size > threshold (phase 2). Requirements: 2.
 
-const pinnedAction = ref({
-  icon: "i-codicon:pinned",
-  tooltip: "Pin Thread",
-  action: (id: string) => {
-    useNuxtApp().$sync.updateThread(id, { pinned: true });
-  },
-});
+## 4. Progressive hydration of Sidebar/ThreadList
 
-const unpinnedAction = ref({
-  icon: "i-mdi-light:pin-off",
-  tooltip: "Unpin Thread",
-  action: (id: string) => {
-    useNuxtApp().$sync.updateThread(id, { pinned: false });
-  },
-});
+- [ ] Wrap `Sidebar.vue` in a lightweight shell that renders header + New Chat instantly; lazy-load the thread lists using `defineAsyncComponent` or `ClientOnly` with `when-visible` sentinel. Requirements: 1,4.
+- [x] Defer expensive icon sets and popovers until hover/focus (use dynamic import for popover content). Requirements: 4.
 
-const moreOptionsAction = ref({
-  icon: "heroicons:ellipsis-horizontal-solid",
-  tooltip: "More options",
-});
+## 5. Lazy wa-sqlite/db initialization
 
-const openDeleteModal = ref(false);
-const threadToDelete = ref<any>(null);
+- [x] Create `utils/db-facade.ts` to gate dynamic import('wa-sqlite'); export `init()` and `getThreadsPreview()` returning cached preview from localStorage on first call. Requirements: 2.
+- [x] Hydrate preview cache whenever sidebar successfully loads threads; write to localStorage for future fast boots. Requirements: 2.
 
-const moreActions = ref([
-  {
-    icon: props.pinned ? unpinnedAction.value.icon : pinnedAction.value.icon,
-    name: props.pinned ? "Unpin" : "Pin",
-    action: (thread: any) => {
-      if (props.pinned) {
-        unpinnedAction.value.action(thread.id);
-      } else {
-        pinnedAction.value.action(thread.id);
-      }
-    },
-  },
-  {
-    icon: "heroicons:pencil-square",
-    name: "Rename",
-    action: (thread) => {
-      editThread(thread);
-    },
-  },
-  {
-    icon: "heroicons:trash",
-    name: "Delete",
-    action: (thread) => {
-      popperThreadId.value = null;
-      threadToDelete.value = thread;
-      openDeleteModal.value = true;
-    },
-  },
-  {
-    icon: "heroicons:arrow-down-tray-20-solid",
-    name: "Export",
-    action: () => {
-      // Implement action to edit message
-    },
-  },
-]);
+## 6. Vite/Nuxt build tuning
 
-const cancelDelete = () => {
-  openDeleteModal.value = false;
-  threadToDelete.value = null;
-};
+- [ ] Re-evaluate `transpile`/`optimizeDeps` for wa-sqlite and estree-walker to minimize dev-time bundling overhead; only transpile if necessary. Requirements: 1,2.
+- [ ] Enable route-level code splitting where possible (ensure pages/[[id]].vue is standalone). Requirements: 1.
 
-const confirmDelete = () => {
-  useNuxtApp().$sync.updateThread(threadToDelete.value?.id, { deleted: true });
-  openDeleteModal.value = false;
-  threadToDelete.value = null;
-};
-</script>
+## 7. QA and perf verification
 
-<script lang="ts">
-export default {};
-</script>
+- [ ] Add a minimal Lighthouse CI script or manual instructions to measure TTI/FCP/BTI locally. Requirements: 5.
+- [ ] Validate p95 budgets on cold and warm loads; capture numbers in a short perf report in PR. Requirements: 1,5.
 
-<style scoped>
-.gradient-bg-light {
-  background: linear-gradient(to right, transparent 0%, #fff 20%, #fff 100%);
-}
+## 8. Safeguards and regressions
 
-.gradient-bg-dark {
-  background: linear-gradient(
-    to right,
-    transparent 0%,
-    #262626 20%,
-    #262626 100%
-  );
-}
-</style>
+- [ ] Add unit tests for lazy loaders; smoke test markdown with math and code blocks. Requirements: 6.
+- [ ] Add fallback for `requestIdleCallback` using `setTimeout`. Requirements: 2.
+
+## Notes / Phase 2 (optional)
+
+- Worker-ize markdown processing for long documents, and stream tokens directly into renderer.
+- Cache KaTeX CSS integrity-verified locally and ship with app to remove third-party fetch.
 ````
 
 ## File: packages/app/app/composables/usePromptStore.ts
@@ -8137,107 +7980,251 @@ export const usePromptStore = defineStore("prompt", () => {
 });
 ````
 
-## File: packages/app/app/components/MarkdownRenderer.vue
+## File: packages/app/app/components/ChatThread.vue
 ````vue
 <template>
-  <div
-    ref="root"
-    class="prose dark:prose-invert [&>div:last-child>p:last-child]:mb-0 [&>div:first-child>p:first-child]:mt-0 overflow-x-auto"
-  >
-    <template v-if="!allReady">
-      <!-- show a single skeleton block as placeholder until first chunk resolves -->
-      <MarkdownSkeleton :variant="variant" />
-    </template>
-    <template v-else>
-      <MarkdownChunkRenderer
-        v-for="(b, index) in blocks"
-        :key="index"
-        :block="b"
-        :variant="variant"
+  <div v-for="(threads, category) in threads" :key="category" class="space-y-1">
+    <h3
+      class="mb-2 flex items-center gap-1 text-xs uppercase font-semibold tracking-wide"
+      :class="[
+        category.toLowerCase() === 'pinned'
+          ? 'text-primary-600/80 dark:text-primary-400/80'
+          : 'text-neutral-700 dark:text-neutral-300',
+      ]"
+    >
+      <UIcon
+        v-if="category.toLowerCase() === 'pinned'"
+        name="i-codicon:pinned"
+        class="size-3.5"
       />
-    </template>
+      {{ category }}
+    </h3>
+    <div
+      v-for="thread in threads"
+      :key="thread.id"
+      @click="switchThread(thread)"
+      class="p-1.5 rounded-lg hover:bg-white dark:hover:bg-neutral-800 cursor-pointer group overflow-hidden"
+      :class="[
+        popperThreadId === thread.id || activeThread === thread.id
+          ? 'bg-white dark:bg-neutral-800'
+          : '',
+      ]"
+    >
+      <div class="flex justify-start gap-2 items-center relative">
+        <UIcon
+          v-if="thread.parent_thread_id"
+          name="i-carbon:branch"
+          class="size-3.5"
+        />
+        <span
+          v-if="editableThreadId != thread.id"
+          class="text-sm font-medium text-neutral-500 dark:text-neutral-400 truncate"
+          @dblclick="editThread(thread)"
+          :title="thread.title"
+        >
+          {{ thread.title }}
+        </span>
+        <UInput
+          v-if="editableThreadId === thread.id"
+          :id="`thread-input-${thread.id}`"
+          v-model="thread.title"
+          class="w-full"
+          :ui="{
+            base: 'truncate p-0 pb-0.5 ring-0 focus-visible:ring-0 border-b border-b-neutral-600/50 rounded-none bg-transparent',
+          }"
+          @blur="saveThread(thread)"
+          @keydown.enter="saveThread(thread)"
+        />
+
+        <div
+          @click.stop
+          class="h-full absolute right-0 pl-3 pr-0.5 gap-1 flex items-center group-hover:translate-x-1 rounded-lg transition-transform duration-100 bg-[linear-gradient(to_right,_transparent_0%,_white_20%,_white_100%)] dark:bg-[linear-gradient(to_right,_transparent_0%,_#262626_20%,_#262626_100%)]"
+          :class="[
+            popperThreadId === thread.id
+              ? 'transform translate-x-1'
+              : 'transform translate-x-[120%]',
+          ]"
+        >
+          <UTooltip
+            :disableHoverableContent="true"
+            :text="pinned ? unpinnedAction.tooltip : pinnedAction.tooltip"
+          >
+            <UButton
+              :icon="pinned ? unpinnedAction.icon : pinnedAction.icon"
+              variant="ghost"
+              color="neutral"
+              size="xs"
+              class="dark:hover:bg-neutral-700/70 rounded-md flex items-center"
+              @click="
+                pinned
+                  ? unpinnedAction.action(thread.id)
+                  : pinnedAction.action(thread.id)
+              "
+            />
+          </UTooltip>
+
+          <UPopover
+            @update:open="
+              (isOpen: boolean) => (popperThreadId = isOpen ? thread.id : null)
+            "
+            :open="popperThreadId === thread.id"
+          >
+            <UButton
+              :icon="moreOptionsAction.icon"
+              variant="ghost"
+              color="neutral"
+              size="xs"
+              :title="popperThreadId"
+              class="dark:hover:bg-neutral-700/70 rounded-md flex items-center"
+              :class="[
+                popperThreadId === thread.id ? 'dark:bg-neutral-700/70' : '',
+              ]"
+            />
+            <template #content>
+              <LazyFragmentsThreadMenu
+                :moreActions="moreActions"
+                :thread="thread"
+              />
+            </template>
+          </UPopover>
+        </div>
+      </div>
+    </div>
   </div>
+
+  <DeleteModal
+    v-model="openDeleteModal"
+    :thread="threadToDelete"
+    @cancelDelete="cancelDelete"
+    @confirmDelete="confirmDelete"
+  />
 </template>
 
 <script setup lang="ts">
-import { marked } from "marked";
-import { useIntersectionObserver } from "@vueuse/core";
-
-const emit = defineEmits(["rendered"]);
-const { content, chunked, variant } = withDefaults(
-  defineProps<{
-    content: string;
-    chunked?: boolean;
-    variant?: "user" | "assistant";
-  }>(),
-  { variant: "assistant" },
-);
-const blocks = computed(() =>
-  chunked ? marked.lexer(content || "").map((block) => block.raw) : [content],
-);
-const allReady = ref(false);
-const root = ref<HTMLElement | null>(null);
-const inView = ref(false);
-const firstShownAt = ref<number | null>(null);
-
-onMounted(() => {
-  const { stop } = useIntersectionObserver(
-    root,
-    ([entry]) => {
-      if (!entry) return;
-      if (entry.isIntersecting) {
-        inView.value = true;
-        // Once visible, stop observing
-        stop();
-      }
-    },
-    { rootMargin: "200px 0px 200px 0px", threshold: 0.01 },
-  );
+const props = defineProps({
+  threads: {
+    type: Object,
+    default: () => {},
+  },
+  pinned: {
+    type: Boolean,
+    default: false,
+  },
 });
+const threadsStore = useThreadsStore();
+const popperThreadId = ref<number | null>(null);
+const { activeThread } = storeToRefs(threadsStore);
+const { $sync } = useNuxtApp();
 
-async function preRenderAll() {
-  if (!import.meta.client) return;
-  allReady.value = false;
-  const { renderMarkdownChunk } = await import("~/utils/markdown-lazy");
-  await Promise.all((blocks.value || []).map((b) => renderMarkdownChunk(b)));
-  // Guarantee a brief skeleton display for user variant on initial load
-  const minMs = variant === "user" ? 220 : 0;
-  if (firstShownAt.value && minMs > 0) {
-    const elapsed = performance.now() - firstShownAt.value;
-    if (elapsed < minMs) {
-      await new Promise((r) => setTimeout(r, minMs - elapsed));
-    }
-  }
-  allReady.value = true;
-  emit("rendered");
+function switchThread(thread: any) {
+  navigateTo(`/${thread.id}`);
 }
 
-watch(
-  [() => content, inView],
-  async () => {
-    if (!import.meta.client) {
-      allReady.value = false;
-      return;
-    }
-    if (!inView.value) {
-      allReady.value = false;
-      return;
-    }
-    if (firstShownAt.value === null) firstShownAt.value = performance.now();
-    await preRenderAll();
+const editableThreadId = ref<number | null>(null);
+const editThread = (thread: any) => {
+  editableThreadId.value = thread.id;
+  requestAnimationFrame(() => {
+    const input = document.getElementById(`thread-input-${thread.id}`);
+    input?.focus();
+  });
+};
+
+const saveThread = (thread: any) => {
+  editableThreadId.value = null;
+  $sync.updateThread(thread.id, { title: thread.title });
+};
+
+const pinnedAction = ref({
+  icon: "i-codicon:pinned",
+  tooltip: "Pin Thread",
+  action: (id: string) => {
+    useNuxtApp().$sync.updateThread(id, { pinned: true });
   },
-  { immediate: true },
-);
+});
+
+const unpinnedAction = ref({
+  icon: "i-mdi-light:pin-off",
+  tooltip: "Unpin Thread",
+  action: (id: string) => {
+    useNuxtApp().$sync.updateThread(id, { pinned: false });
+  },
+});
+
+const moreOptionsAction = ref({
+  icon: "heroicons:ellipsis-horizontal-solid",
+  tooltip: "More options",
+});
+
+const openDeleteModal = ref(false);
+const threadToDelete = ref<any>(null);
+
+const moreActions = ref([
+  {
+    icon: props.pinned ? unpinnedAction.value.icon : pinnedAction.value.icon,
+    name: props.pinned ? "Unpin" : "Pin",
+    action: (thread: any) => {
+      if (props.pinned) {
+        unpinnedAction.value.action(thread.id);
+      } else {
+        pinnedAction.value.action(thread.id);
+      }
+    },
+  },
+  {
+    icon: "heroicons:pencil-square",
+    name: "Rename",
+    action: (thread) => {
+      editThread(thread);
+    },
+  },
+  {
+    icon: "heroicons:trash",
+    name: "Delete",
+    action: (thread) => {
+      popperThreadId.value = null;
+      threadToDelete.value = thread;
+      openDeleteModal.value = true;
+    },
+  },
+  {
+    icon: "heroicons:arrow-down-tray-20-solid",
+    name: "Export",
+    action: () => {
+      // Implement action to edit message
+    },
+  },
+]);
+
+const cancelDelete = () => {
+  openDeleteModal.value = false;
+  threadToDelete.value = null;
+};
+
+const confirmDelete = () => {
+  useNuxtApp().$sync.updateThread(threadToDelete.value?.id, { deleted: true });
+  openDeleteModal.value = false;
+  threadToDelete.value = null;
+};
 </script>
 
 <script lang="ts">
-export default {
-  components: {
-    MarkdownSkeleton: () => import("./MarkdownSkeleton.vue"),
-    MarkdownChunkRenderer: () => import("./MarkdownChunkRenderer.client.vue"),
-  },
-};
+export default {};
 </script>
+
+<style scoped>
+.gradient-bg-light {
+  background: linear-gradient(to right, transparent 0%, #fff 20%, #fff 100%);
+}
+
+.gradient-bg-dark {
+  background: linear-gradient(
+    to right,
+    transparent 0%,
+    #262626 20%,
+    #262626 100%
+  );
+}
+</style>
 ````
 
 ## File: packages/app/app/components/ModelSelector.vue
@@ -8434,222 +8421,6 @@ onMounted(async () => {
   }
 });
 </script>
-````
-
-## File: packages/app/app/composables/useThreadsStore.ts
-````typescript
-export interface Thread {
-  id: string;
-  title: string;
-  created_at: number;
-  updated_at: number;
-  last_message_at: number;
-  parent_thread_id?: string | null;
-  status: "ready" | "streaming" | "error";
-  deleted?: boolean;
-  pinned?: boolean;
-  clock?: number;
-}
-
-export interface GroupedThreads {
-  [groupName: string]: Thread[];
-}
-
-const getThreadTime = (thread: any) => {
-  return Math.max(thread.created_at, thread.last_message_at);
-};
-
-export const useThreadsStore = defineStore("threads", () => {
-  const threads = ref<Record<string, Thread>>({});
-  const activeThread = ref<string | null>(null);
-  const messages = ref<Record<string, any>>({});
-  const responseStreaming = ref(false);
-  const stopStreaming = ref(false);
-
-  watch(
-    threads,
-    (newThreads) => {
-      if (import.meta.client) {
-        if (activeThread.value) {
-          const thread = newThreads[activeThread.value];
-          if (thread) {
-            responseStreaming.value = thread.status === "streaming";
-            if (thread.status != "streaming") {
-              stopStreaming.value = false;
-            }
-          } else {
-            responseStreaming.value = false;
-          }
-        }
-      }
-    },
-    { deep: true },
-  );
-
-  function addMessage(msg: any) {
-    messages.value[msg.id as string] = msg;
-  }
-
-  const messagesList = computed(() =>
-    Object.values(messages.value).toSorted((a, b) => {
-      // Sort by index first, then by created_at as a safety net
-      if (a.index !== b.index) {
-        return (a.index || 0) - (b.index || 0);
-      }
-      return a.created_at - b.created_at;
-    }),
-  );
-
-  const pinnedThreads = computed(() => {
-    const result: GroupedThreads = { pinned: [] };
-    for (const thread of Object.values(threads.value)) {
-      if (thread.pinned && !thread.deleted) {
-        result.pinned!.push(thread);
-      }
-    }
-    result.pinned!.sort((a, b) => getThreadTime(b) - getThreadTime(a));
-    return result;
-  });
-
-  const unpinnedThreads = computed(() => {
-    const now = Date.now();
-    const today = new Date(now);
-    today.setHours(0, 0, 0, 0);
-    const yesterday = new Date(today);
-    yesterday.setDate(today.getDate() - 1);
-    const sevenDaysAgo = new Date(today);
-    sevenDaysAgo.setDate(today.getDate() - 7);
-    const thirtyDaysAgo = new Date(today);
-    thirtyDaysAgo.setDate(today.getDate() - 30);
-
-    const groups: GroupedThreads = {
-      today: [],
-      yesterday: [],
-      "last 7 days": [],
-      "last 30 days": [],
-      older: [],
-    };
-
-    const unpinned = Object.values(threads.value)
-      .filter((thread) => !thread.pinned && !thread.deleted)
-      .sort((a, b) => getThreadTime(b) - getThreadTime(a));
-
-    unpinned.forEach((thread) => {
-      const threadDate = new Date(thread.last_message_at);
-      if (threadDate >= today) {
-        groups.today!.push(thread);
-      } else if (threadDate >= yesterday) {
-        groups.yesterday!.push(thread);
-      } else if (threadDate >= sevenDaysAgo) {
-        groups["last 7 days"]!.push(thread);
-      } else if (threadDate >= thirtyDaysAgo) {
-        groups["last 30 days"]!.push(thread);
-      } else {
-        groups.older!.push(thread);
-      }
-    });
-
-    for (const groupName of Object.keys(groups)) {
-      if (groups[groupName]!.length === 0) {
-        delete groups[groupName];
-      }
-    }
-
-    return groups;
-  });
-
-  let messagesChannel: BroadcastChannel;
-  function setActiveThread(threadId: string | null) {
-    if (import.meta.client) {
-      activeThread.value = threadId;
-      messages.value = {};
-      if (threadId) {
-        const { $sync } = useNuxtApp();
-        $sync.getMessagesForThread?.(threadId).then((msgs: any[]) => {
-          msgs.forEach((msg) => (messages.value[msg.id] = msg));
-        });
-      }
-      if (messagesChannel) {
-        messagesChannel.close();
-      }
-      messagesChannel = new BroadcastChannel(`messages-channel-${threadId}`);
-      messagesChannel.onmessage = (
-        event: MessageEvent<{ type: string; payload: any }>,
-      ) => {
-        const { type, payload } = event.data;
-        if (type === "message_update") {
-          if (payload.thread_id !== activeThread.value) return;
-          if (payload.deleted) delete messages.value[payload.id];
-          else messages.value[payload.id] = payload;
-        }
-      };
-    }
-  }
-
-  function setThread(thread: Thread) {
-    threads.value[thread.id] = thread;
-  }
-
-  function addThreads(newThreads: Thread[]) {
-    newThreads.forEach((thread) => {
-      threads.value[thread.id] = thread;
-    });
-  }
-
-  function removeThread(threadId: string) {
-    if (threads.value[threadId]) {
-      delete threads.value[threadId];
-    }
-  }
-
-  if (import.meta.client) {
-    const { $sync } = useNuxtApp();
-
-    const fetchInitialThreads = async () => {
-      try {
-        const initialThreadsArray = await $sync.getThreads!();
-        if (initialThreadsArray) {
-          addThreads(initialThreadsArray);
-        }
-      } catch (error) {
-        console.error("Failed to fetch initial threads:", error);
-      }
-    };
-
-    fetchInitialThreads();
-
-    const threadsChannel = new BroadcastChannel("threads-channel");
-    threadsChannel.onmessage = (event: MessageEvent) => {
-      const { type, payload } = event.data as { type: string; payload: any };
-      if (type === "thread_update") {
-        const thread = payload as Thread;
-        if (thread.deleted) removeThread(thread.id);
-        else setThread(thread);
-      }
-    };
-  }
-
-  const activeThreadObject = computed(
-    () => threads.value[activeThread.value || ""] || null,
-  );
-
-  return {
-    threads,
-    responseStreaming,
-    stopStreaming,
-    messages,
-    messagesList,
-    activeThread,
-    activeThreadObject,
-    pinnedThreads,
-    unpinnedThreads,
-    setThread,
-    setActiveThread,
-    addThreads,
-    removeThread,
-    addMessage,
-  };
-});
 ````
 
 ## File: packages/app/app/workers/database.ts
@@ -9541,6 +9312,110 @@ Budgets (dev):
 - heavy_deps_loaded ≤ 3000ms from app_start
 ````
 
+## File: packages/app/app/components/MarkdownRenderer.vue
+````vue
+<template>
+  <div
+    ref="root"
+    class="prose dark:prose-invert [&>div:last-child>p:last-child]:mb-0 [&>div:first-child>p:first-child]:mt-0 overflow-x-auto"
+  >
+    <template v-if="!allReady">
+      <!-- show a single skeleton block as placeholder until first chunk resolves -->
+      <MarkdownSkeleton :variant="variant" />
+    </template>
+    <template v-else>
+      <MarkdownChunkRenderer
+        v-for="(b, index) in blocks"
+        :key="index"
+        :block="b"
+        :variant="variant"
+      />
+    </template>
+  </div>
+</template>
+
+<script setup lang="ts">
+import { marked } from "marked";
+import { useIntersectionObserver } from "@vueuse/core";
+
+const emit = defineEmits(["rendered"]);
+const {
+  content,
+  chunked,
+  variant = "assistant",
+} = defineProps<{
+  content: string;
+  chunked?: boolean;
+  variant?: "user" | "assistant";
+}>();
+const blocks = computed(() =>
+  chunked ? marked.lexer(content || "").map((block) => block.raw) : [content],
+);
+const allReady = ref(false);
+const root = ref<HTMLElement | null>(null);
+const inView = ref(false);
+const firstShownAt = ref<number | null>(null);
+
+onMounted(() => {
+  const { stop } = useIntersectionObserver(
+    root,
+    ([entry]) => {
+      if (!entry) return;
+      if (entry.isIntersecting) {
+        inView.value = true;
+        // Once visible, stop observing
+        stop();
+      }
+    },
+    { rootMargin: "200px 0px 200px 0px", threshold: 0.01 },
+  );
+});
+
+async function preRenderAll() {
+  if (!import.meta.client) return;
+  allReady.value = false;
+  const { renderMarkdownChunk } = await import("~/utils/markdown-lazy");
+  await Promise.all((blocks.value || []).map((b) => renderMarkdownChunk(b)));
+  // Guarantee a brief skeleton display for user variant on initial load
+  const minMs = variant === "user" ? 220 : 0;
+  if (firstShownAt.value && minMs > 0) {
+    const elapsed = performance.now() - firstShownAt.value;
+    if (elapsed < minMs) {
+      await new Promise((r) => setTimeout(r, minMs - elapsed));
+    }
+  }
+  allReady.value = true;
+  emit("rendered");
+}
+
+watch(
+  [() => content, inView],
+  async () => {
+    if (!import.meta.client) {
+      allReady.value = false;
+      return;
+    }
+    if (!inView.value) {
+      allReady.value = false;
+      return;
+    }
+    if (firstShownAt.value === null) firstShownAt.value = performance.now();
+    await preRenderAll();
+  },
+  { immediate: true },
+);
+</script>
+
+<script lang="ts">
+export default {
+  components: {
+    MarkdownSkeleton: () => import("./MarkdownSkeleton.vue"),
+    MarkdownChunkRenderer: () => import("./MarkdownChunkRenderer.client.vue"),
+  },
+};
+</script>
+````
+
 ## File: packages/app/app/components/Settings.vue
 ````vue
 <template>
@@ -10119,6 +9994,231 @@ onBeforeUnmount(() => {
 </script>
 ````
 
+## File: packages/app/app/composables/useThreadsStore.ts
+````typescript
+export interface Thread {
+  id: string;
+  title: string;
+  created_at: number;
+  updated_at: number;
+  last_message_at: number;
+  parent_thread_id?: string | null;
+  status: "ready" | "streaming" | "error";
+  deleted?: boolean;
+  pinned?: boolean;
+  clock?: number;
+}
+
+export interface GroupedThreads {
+  [groupName: string]: Thread[];
+}
+
+const getThreadTime = (thread: any) => {
+  return Math.max(thread.created_at, thread.last_message_at);
+};
+
+export const useThreadsStore = defineStore("threads", () => {
+  const threads = ref<Record<string, Thread>>({});
+  const activeThread = ref<string | null>(null);
+  const messages = ref<Record<string, any>>({});
+  const responseStreaming = ref(false);
+  const stopStreaming = ref(false);
+
+  watch(
+    threads,
+    (newThreads) => {
+      if (import.meta.client) {
+        if (activeThread.value) {
+          const thread = newThreads[activeThread.value];
+          if (thread) {
+            responseStreaming.value = thread.status === "streaming";
+            if (thread.status != "streaming") {
+              stopStreaming.value = false;
+            }
+          } else {
+            responseStreaming.value = false;
+          }
+        }
+      }
+    },
+    { deep: true },
+  );
+
+  function addMessage(msg: any) {
+    messages.value[msg.id as string] = msg;
+  }
+
+  const messagesList = computed(() =>
+    Object.values(messages.value).toSorted((a, b) => {
+      // Sort by index first, then by created_at as a safety net
+      if (a.index !== b.index) {
+        return (a.index || 0) - (b.index || 0);
+      }
+      return a.created_at - b.created_at;
+    }),
+  );
+
+  const pinnedThreads = computed(() => {
+    const result: GroupedThreads = { pinned: [] };
+    for (const thread of Object.values(threads.value)) {
+      if (thread.pinned && !thread.deleted) {
+        result.pinned!.push(thread);
+      }
+    }
+    result.pinned!.sort((a, b) => getThreadTime(b) - getThreadTime(a));
+    return result;
+  });
+
+  const unpinnedThreads = computed(() => {
+    const now = Date.now();
+    const today = new Date(now);
+    today.setHours(0, 0, 0, 0);
+    const yesterday = new Date(today);
+    yesterday.setDate(today.getDate() - 1);
+    const sevenDaysAgo = new Date(today);
+    sevenDaysAgo.setDate(today.getDate() - 7);
+    const thirtyDaysAgo = new Date(today);
+    thirtyDaysAgo.setDate(today.getDate() - 30);
+
+    const groups: GroupedThreads = {
+      today: [],
+      yesterday: [],
+      "last 7 days": [],
+      "last 30 days": [],
+      older: [],
+    };
+
+    const unpinned = Object.values(threads.value)
+      .filter((thread) => !thread.pinned && !thread.deleted)
+      .sort((a, b) => getThreadTime(b) - getThreadTime(a));
+
+    unpinned.forEach((thread) => {
+      const threadDate = new Date(thread.last_message_at);
+      if (threadDate >= today) {
+        groups.today!.push(thread);
+      } else if (threadDate >= yesterday) {
+        groups.yesterday!.push(thread);
+      } else if (threadDate >= sevenDaysAgo) {
+        groups["last 7 days"]!.push(thread);
+      } else if (threadDate >= thirtyDaysAgo) {
+        groups["last 30 days"]!.push(thread);
+      } else {
+        groups.older!.push(thread);
+      }
+    });
+
+    for (const groupName of Object.keys(groups)) {
+      if (groups[groupName]!.length === 0) {
+        delete groups[groupName];
+      }
+    }
+
+    return groups;
+  });
+
+  let messagesChannel: BroadcastChannel | null = null;
+  function setActiveThread(threadId: string | null) {
+    if (import.meta.client) {
+      activeThread.value = threadId;
+      messages.value = {};
+      if (threadId) {
+        const { $sync } = useNuxtApp();
+        (async () => {
+          try {
+            const msgs = ((await $sync.getMessagesForThread?.(threadId)) ??
+              []) as any[];
+            if (Array.isArray(msgs)) {
+              msgs.forEach((msg) => (messages.value[msg.id] = msg));
+            }
+          } catch (e) {
+            console.error("Failed to load messages for thread", threadId, e);
+          }
+        })();
+      }
+      if (messagesChannel) {
+        messagesChannel.close();
+      }
+      messagesChannel = new BroadcastChannel(`messages-channel-${threadId}`);
+      messagesChannel.onmessage = (
+        event: MessageEvent<{ type: string; payload: any }>,
+      ) => {
+        const { type, payload } = event.data;
+        if (type === "message_update") {
+          if (payload.thread_id !== activeThread.value) return;
+          if (payload.deleted) delete messages.value[payload.id];
+          else messages.value[payload.id] = payload;
+        }
+      };
+    }
+  }
+
+  function setThread(thread: Thread) {
+    threads.value[thread.id] = thread;
+  }
+
+  function addThreads(newThreads: Thread[]) {
+    newThreads.forEach((thread) => {
+      threads.value[thread.id] = thread;
+    });
+  }
+
+  function removeThread(threadId: string) {
+    if (threads.value[threadId]) {
+      delete threads.value[threadId];
+    }
+  }
+
+  if (import.meta.client) {
+    const { $sync } = useNuxtApp();
+
+    const fetchInitialThreads = async () => {
+      try {
+        const initialThreadsArray = (await $sync.getThreads!()) as unknown;
+        const arr = Array.isArray(initialThreadsArray)
+          ? (initialThreadsArray as Thread[])
+          : [];
+        if (arr.length) addThreads(arr);
+      } catch (error) {
+        console.error("Failed to fetch initial threads:", error);
+      }
+    };
+
+    fetchInitialThreads();
+
+    const threadsChannel = new BroadcastChannel("threads-channel");
+    threadsChannel.onmessage = (event: MessageEvent) => {
+      const { type, payload } = event.data as { type: string; payload: any };
+      if (type === "thread_update") {
+        const thread = payload as Thread;
+        if (thread.deleted) removeThread(thread.id);
+        else setThread(thread);
+      }
+    };
+  }
+
+  const activeThreadObject = computed(
+    () => threads.value[activeThread.value || ""] || null,
+  );
+
+  return {
+    threads,
+    responseStreaming,
+    stopStreaming,
+    messages,
+    messagesList,
+    activeThread,
+    activeThreadObject,
+    pinnedThreads,
+    unpinnedThreads,
+    setThread,
+    setActiveThread,
+    addThreads,
+    removeThread,
+    addMessage,
+  };
+});
+````
+
 ## File: packages/app/package.json
 ````json
 {
@@ -10595,12 +10695,7 @@ export default {};
     </div>
 
     <div class="space-y-4 p-5">
-      <ChatThread
-        v-if="pinnedThreadsFromPreview.pinned?.length"
-        :threads="pinnedThreadsFromPreview"
-        :pinned="true"
-      />
-      <ChatThread :threads="groupedThreadsFromPreview" :pinned="false" />
+      <LazyThreadLists />
       <div class="h-10" />
     </div>
   </div>
@@ -10684,7 +10779,7 @@ export default {};
       </div>
 
       <template #content>
-        <LazyAccountMenu :actions="actions" :cssVars="cssVars" />
+        <LazyFragmentsAccountMenu :actions="actions" :cssVars="cssVars" />
       </template>
     </UPopover>
     <template #fallback>
@@ -10695,7 +10790,6 @@ export default {};
 
 <script setup lang="ts">
 import { useOpenRouterAuth } from "../composables/useOpenRouterAuth";
-import { useThreadsPreview } from "../composables/useThreadsPreview";
 const route = useRoute();
 const { searchRef } = useSearchRef();
 const { settingsRef } = useSettingsRef();
@@ -10705,7 +10799,7 @@ const pop = useTemplateRef("pop");
 const user = ref({
   user: {
     name: "User",
-    image: "path/to/image.jpg",
+    image: "/nuxflare.png",
   },
 });
 const name = computed(() => user.value.user?.name);
@@ -10770,59 +10864,7 @@ const actions = computed(() => {
   return base;
 });
 
-// Preview-backed sidebar lists
-const { items } = useThreadsPreview();
-
-const getThreadTime = (t: any) =>
-  Math.max(t.last_message_at || 0, t.updated_at || 0);
-
-const pinnedThreadsFromPreview = computed(() => {
-  const result: Record<string, any[]> = { pinned: [] };
-  for (const t of items.value) {
-    if (t.pinned === 1 && t.deleted === 0) result.pinned!.push(t as any);
-  }
-  result.pinned!.sort((a, b) => getThreadTime(b) - getThreadTime(a));
-  return result;
-});
-
-const groupedThreadsFromPreview = computed(() => {
-  const now = Date.now();
-  const today = new Date(now);
-  today.setHours(0, 0, 0, 0);
-  const yesterday = new Date(today);
-  yesterday.setDate(today.getDate() - 1);
-  const sevenDaysAgo = new Date(today);
-  sevenDaysAgo.setDate(today.getDate() - 7);
-  const thirtyDaysAgo = new Date(today);
-  thirtyDaysAgo.setDate(today.getDate() - 30);
-
-  const groups: Record<string, any[]> = {
-    today: [],
-    yesterday: [],
-    "last 7 days": [],
-    "last 30 days": [],
-    older: [],
-  };
-
-  const unpinned = items.value
-    .filter((t) => t.pinned !== 1 && t.deleted === 0)
-    .slice()
-    .sort((a, b) => getThreadTime(b) - getThreadTime(a));
-
-  unpinned.forEach((t) => {
-    const d = new Date(t.last_message_at || 0);
-    if (d >= today) groups.today!.push(t as any);
-    else if (d >= yesterday) groups.yesterday!.push(t as any);
-    else if (d >= sevenDaysAgo) groups["last 7 days"]!.push(t as any);
-    else if (d >= thirtyDaysAgo) groups["last 30 days"]!.push(t as any);
-    else groups.older!.push(t as any);
-  });
-
-  for (const k of Object.keys(groups)) {
-    if (groups[k]!.length === 0) delete groups[k];
-  }
-  return groups;
-});
+// Thread list moved to LazyThreadListsClient which initializes when visible
 
 const openrouterConnected = ref(false);
 
@@ -10879,216 +10921,6 @@ export default {
   },
 };
 </script>
-````
-
-## File: packages/app/app/plugins/sync.client.ts
-````typescript
-export default defineNuxtPlugin({
-  name: "sync",
-  async setup() {
-    const isClient = typeof window !== "undefined";
-    const hasServiceWorker =
-      isClient && "serviceWorker" in navigator && window.isSecureContext;
-
-    // Fallback provider for environments without SW (e.g., iOS over HTTP)
-    if (!hasServiceWorker) {
-      console.warn(
-        "Service Worker not available (insecure context or unsupported). Running in fallback mode without sync.",
-      );
-      const fallbackKVGet = (k: string) =>
-        (typeof localStorage !== "undefined" && localStorage.getItem(k)) ||
-        null;
-      const fallbackKVSet = (k: string, v: string) => {
-        if (typeof localStorage !== "undefined") localStorage.setItem(k, v);
-        return true;
-      };
-      return {
-        provide: {
-          sync: {
-            async setAuthInfo() {
-              /* no-op */
-            },
-            async newThread() {
-              throw new Error("Sync not available in this environment");
-            },
-            async getThreads() {
-              return [];
-            },
-            async getMessagesForThread() {
-              return [];
-            },
-            async updateThread() {
-              /* no-op */
-            },
-            async sendMessage() {
-              throw new Error("Sync not available in this environment");
-            },
-            async getKV(name: string) {
-              return fallbackKVGet(name);
-            },
-            async setKV(name: string, value: string) {
-              return fallbackKVSet(name, value);
-            },
-            async retryMessage() {
-              /* no-op */
-            },
-            async branchThread() {
-              /* no-op */
-            },
-            async updateMessage() {
-              /* no-op */
-            },
-            async searchThreads() {
-              return [];
-            },
-            async clear() {
-              if (typeof localStorage !== "undefined") localStorage.clear();
-              return true;
-            },
-          },
-        },
-      };
-    }
-
-    await navigator.serviceWorker
-      .register("SharedService_ServiceWorker.js")
-      .then(() => navigator.serviceWorker.ready);
-    const sharedService = new SharedService(
-      "sync-service",
-      syncServiceProvider,
-    );
-    sharedService.activate();
-
-    let _ready = false;
-    let _syncReady = false;
-    const readyResolvers: Function[] = [];
-    const syncReadyResolvers: Function[] = [];
-    (async () => {
-      while (!_ready) {
-        await new Promise((res) => setTimeout(res, 30));
-        try {
-          _ready = await Promise.race([
-            new Promise((res) => setTimeout(res, 100)),
-            sharedService.proxy["isReady"]!(),
-          ]);
-        } catch (err) {
-          console.log("err", err);
-          // retry
-        }
-      }
-      console.log("_ready");
-      readyResolvers.forEach((res) => res());
-      while (!_syncReady) {
-        await new Promise((res) => setTimeout(res, 30));
-        try {
-          _syncReady = await sharedService.proxy["isSyncReady"]!();
-        } catch {
-          // retry
-        }
-      }
-      console.log("_syncReady");
-      syncReadyResolvers.forEach((res) => res());
-    })();
-
-    async function isReady() {
-      if (_ready) return true;
-      return new Promise((res) => {
-        readyResolvers.push(res);
-      });
-    }
-    async function isSyncReady() {
-      if (_syncReady) return true;
-      return new Promise((res) => {
-        syncReadyResolvers.push(res);
-      });
-    }
-
-    return {
-      provide: {
-        sync: {
-          async setAuthInfo(endpoint: string, token: string) {
-            await isReady();
-            return await sharedService.proxy["setAuthInfo"]!(endpoint, token);
-          },
-          async newThread(params: {
-            content: string;
-            attachments?: any[];
-            options: { name: string; thinkingBudget: string };
-          }) {
-            await isSyncReady();
-            return await sharedService.proxy["newThread"]!(params);
-          },
-          async getThreads() {
-            await isReady();
-            return await sharedService.proxy["getThreads"]!();
-          },
-          async getMessagesForThread(threadId: string) {
-            await isReady();
-            return await sharedService.proxy["getMessagesForThread"]!(threadId);
-          },
-          async updateThread(id: string, update: any) {
-            await isSyncReady();
-            return await sharedService.proxy["updateThread"]!(id, update);
-          },
-          async sendMessage(params: {
-            threadId: string;
-            content: string;
-            attachments?: any[];
-            options: { name: string; thinkingBudget: string };
-          }) {
-            await isSyncReady();
-            return await sharedService.proxy["sendMessage"]!(params);
-          },
-          async getKV(name: string) {
-            await isSyncReady();
-            return await sharedService.proxy["getKV"]!(name);
-          },
-          async setKV(name: string, value: string) {
-            await isSyncReady();
-            return await sharedService.proxy["setKV"]!(name, value);
-          },
-          async retryMessage(
-            messageId: string,
-            options?: { model?: string; thinkingBudget?: string },
-          ) {
-            await isSyncReady();
-            return await sharedService.proxy["retryMessage"]!(
-              messageId,
-              options,
-            );
-          },
-          async branchThread(
-            threadId: string,
-            messageId: string,
-            newThreadId: string,
-          ) {
-            await isSyncReady();
-            return await sharedService.proxy["branchThread"]!(
-              threadId,
-              messageId,
-              newThreadId,
-            );
-          },
-          async updateMessage(
-            id: string,
-            update: { data?: any; deleted?: boolean },
-          ) {
-            await isSyncReady();
-            return await sharedService.proxy["updateMessage"]!(id, update);
-          },
-          async searchThreads(query: string) {
-            await isReady();
-            return await sharedService.proxy["searchThreads"]!(query);
-          },
-          async clear() {
-            await isReady();
-            return await sharedService.proxy["clear"]!();
-          },
-        },
-      },
-    };
-  },
-});
 ````
 
 ## File: packages/app/app/pages/[[id]].vue
@@ -11354,7 +11186,8 @@ const selectPrompt = (prompt: any) => {
 watch(
   () => route.params.id,
   async (newId) => {
-    const newThreadId = newId as string | null;
+    const newThreadId =
+      typeof newId === "string" && newId.length > 0 ? newId : null;
     threadsStore.setActiveThread(newThreadId);
   },
   { immediate: true },
@@ -11406,12 +11239,14 @@ const sendMessage = async (text: string) => {
   }
   if (!currentThreadId) {
     try {
-      const { threadId: newThreadId } = await $sync.newThread({
+      const newThreadResp = (await $sync.newThread({
         content: text,
         attachments,
         options,
-      });
-      navigateTo(`/${newThreadId}`);
+      })) as any;
+      const newThreadId = (newThreadResp &&
+        (newThreadResp.threadId || newThreadResp.id)) as string;
+      if (newThreadId) navigateTo(`/${newThreadId}`);
     } catch (error) {
       console.error("Failed to create new thread:", error);
     }
@@ -11495,6 +11330,309 @@ const scrollToBottom = () => {
   transform: scale(1);
 }
 </style>
+````
+
+## File: packages/app/app/plugins/sync.client.ts
+````typescript
+export default defineNuxtPlugin({
+  name: "sync",
+  setup() {
+    const isClient = typeof window !== "undefined";
+    const hasServiceWorker =
+      isClient && "serviceWorker" in navigator && window.isSecureContext;
+
+    // Fallback provider for environments without SW (e.g., iOS over HTTP)
+    if (!hasServiceWorker) {
+      console.warn(
+        "Service Worker not available (insecure context or unsupported). Running in fallback mode without sync.",
+      );
+      const fallbackKVGet = (k: string) =>
+        (typeof localStorage !== "undefined" && localStorage.getItem(k)) ||
+        null;
+      const fallbackKVSet = (k: string, v: string) => {
+        if (typeof localStorage !== "undefined") localStorage.setItem(k, v);
+        return true;
+      };
+      return {
+        provide: {
+          sync: {
+            async setAuthInfo(_endpoint: string, _token: string) {
+              /* no-op */
+            },
+            async newThread(_params: {
+              content: string;
+              attachments?: any[];
+              options: { name: string; thinkingBudget: string };
+            }) {
+              throw new Error("Sync not available in this environment");
+            },
+            async getThreads() {
+              return [];
+            },
+            async getMessagesForThread(_threadId: string) {
+              return [];
+            },
+            async updateThread(_id: string, _update: any) {
+              /* no-op */
+            },
+            async sendMessage(_params: {
+              threadId: string;
+              content: string;
+              attachments?: any[];
+              options: { name: string; thinkingBudget: string };
+            }) {
+              throw new Error("Sync not available in this environment");
+            },
+            async getKV(name: string) {
+              return fallbackKVGet(name);
+            },
+            async setKV(name: string, value: string) {
+              return fallbackKVSet(name, value);
+            },
+            async retryMessage(
+              _messageId: string,
+              _options?: { model?: string; thinkingBudget?: string },
+            ) {
+              /* no-op */
+            },
+            async branchThread(
+              _threadId: string,
+              _messageId: string,
+              _newThreadId: string,
+            ) {
+              /* no-op */
+            },
+            async updateMessage(
+              _id: string,
+              _update: { data?: any; deleted?: boolean },
+            ) {
+              /* no-op */
+            },
+            async searchThreads(_query: string) {
+              return [];
+            },
+            async clear() {
+              if (typeof localStorage !== "undefined") localStorage.clear();
+              return true;
+            },
+          },
+        },
+      };
+    }
+
+    // Non-blocking initialization state and call queue
+    type Level = "provider" | "sync";
+    type QueuedCall = {
+      level: Level;
+      method: string;
+      args: any[];
+      resolve: (v: any) => void;
+      reject: (e: any) => void;
+    };
+
+    const queue: QueuedCall[] = [];
+    let sharedService: any | null = null;
+    let providerReady = false;
+    let syncReady = false;
+
+    let resolveProviderReady: (() => void) | null = null;
+    const providerReadyPromise = new Promise<void>((res) => {
+      resolveProviderReady = res;
+    });
+    let resolveSyncReady: (() => void) | null = null;
+    const syncReadyPromise = new Promise<void>((res) => {
+      resolveSyncReady = res;
+    });
+
+    function flushQueue() {
+      if (!sharedService) return;
+      const readyNow: QueuedCall[] = [];
+      const rest: QueuedCall[] = [];
+      for (const item of queue) {
+        const ok =
+          (item.level === "provider" && providerReady) ||
+          (item.level === "sync" && syncReady);
+        (ok ? readyNow : rest).push(item);
+      }
+      queue.length = 0;
+      queue.push(...rest);
+      for (const item of readyNow) {
+        Promise.resolve(sharedService.proxy[item.method]!(...item.args))
+          .then(item.resolve)
+          .catch(item.reject);
+      }
+    }
+
+    function startReadinessWatchers() {
+      if (!sharedService) return;
+      // Provider readiness: poll lightly with backoff without blocking setup
+      const checkProvider = (delay = 50) => {
+        Promise.resolve(sharedService.proxy["isReady"]!())
+          .then((val: any) => {
+            if (val && !providerReady) {
+              providerReady = true;
+              resolveProviderReady?.();
+              flushQueue();
+            } else if (!providerReady) {
+              setTimeout(
+                () => checkProvider(Math.min(delay * 1.5, 1000)),
+                delay,
+              );
+            }
+          })
+          .catch(() =>
+            setTimeout(() => checkProvider(Math.min(delay * 1.5, 1000)), delay),
+          );
+      };
+      checkProvider();
+
+      // Sync readiness follows provider readiness
+      const checkSync = (delay = 100) => {
+        if (!providerReady) {
+          setTimeout(() => checkSync(delay), delay);
+          return;
+        }
+        Promise.resolve(sharedService.proxy["isSyncReady"]!())
+          .then((val: any) => {
+            if (val && !syncReady) {
+              syncReady = true;
+              resolveSyncReady?.();
+              flushQueue();
+            } else if (!syncReady) {
+              setTimeout(() => checkSync(Math.min(delay * 1.5, 1500)), delay);
+            }
+          })
+          .catch(() =>
+            setTimeout(() => checkSync(Math.min(delay * 1.5, 1500)), delay),
+          );
+      };
+      checkSync();
+    }
+
+    function ensureInit() {
+      if (sharedService) return;
+
+      const init = () => {
+        // Kick off SW registration without awaiting
+        navigator.serviceWorker
+          .register("SharedService_ServiceWorker.js")
+          .catch((e) => console.warn("SW registration failed", e));
+
+        sharedService = new SharedService("sync-service", syncServiceProvider);
+        sharedService.activate();
+        startReadinessWatchers();
+      };
+
+      // Kick off immediately in a microtask to avoid delaying first $sync calls
+      queueMicrotask(init);
+    }
+
+    const READ_THROUGH_METHODS = new Set([
+      "getThreads",
+      "getMessagesForThread",
+      "searchThreads",
+    ]);
+
+    function enqueue(level: Level, method: string, args: any[]) {
+      ensureInit();
+      return new Promise((resolve, reject) => {
+        const canCallNow =
+          sharedService &&
+          ((level === "provider" && providerReady) ||
+            (level === "sync" && syncReady));
+
+        // For read-only provider calls, attempt a direct call even if providerReady flag
+        // hasn’t flipped yet. The proxy will wait for the provider port when it’s ready.
+        const tryDirect =
+          sharedService &&
+          level === "provider" &&
+          READ_THROUGH_METHODS.has(method);
+
+        if (canCallNow || tryDirect) {
+          Promise.resolve(sharedService!.proxy[method]!(...args))
+            .then(resolve)
+            .catch((err) => {
+              // If it still fails (e.g., provider port not ready), fall back to queueing.
+              queue.push({ level, method, args, resolve, reject });
+              // Re-try flush soon to recover quickly
+              setTimeout(flushQueue, 50);
+            });
+        } else {
+          queue.push({ level, method, args, resolve, reject });
+        }
+      });
+    }
+
+    return {
+      provide: {
+        sync: {
+          async setAuthInfo(endpoint: string, token: string) {
+            return enqueue("provider", "setAuthInfo", [endpoint, token]);
+          },
+          async newThread(params: {
+            content: string;
+            attachments?: any[];
+            options: { name: string; thinkingBudget: string };
+          }) {
+            return enqueue("sync", "newThread", [params]);
+          },
+          async getThreads() {
+            return enqueue("provider", "getThreads", []);
+          },
+          async getMessagesForThread(threadId: string) {
+            return enqueue("provider", "getMessagesForThread", [threadId]);
+          },
+          async updateThread(id: string, update: any) {
+            return enqueue("sync", "updateThread", [id, update]);
+          },
+          async sendMessage(params: {
+            threadId: string;
+            content: string;
+            attachments?: any[];
+            options: { name: string; thinkingBudget: string };
+          }) {
+            return enqueue("sync", "sendMessage", [params]);
+          },
+          async getKV(name: string) {
+            return enqueue("sync", "getKV", [name]);
+          },
+          async setKV(name: string, value: string) {
+            return enqueue("sync", "setKV", [name, value]);
+          },
+          async retryMessage(
+            messageId: string,
+            options?: { model?: string; thinkingBudget?: string },
+          ) {
+            return enqueue("sync", "retryMessage", [messageId, options]);
+          },
+          async branchThread(
+            threadId: string,
+            messageId: string,
+            newThreadId: string,
+          ) {
+            return enqueue("sync", "branchThread", [
+              threadId,
+              messageId,
+              newThreadId,
+            ]);
+          },
+          async updateMessage(
+            id: string,
+            update: { data?: any; deleted?: boolean },
+          ) {
+            return enqueue("sync", "updateMessage", [id, update]);
+          },
+          async searchThreads(query: string) {
+            return enqueue("provider", "searchThreads", [query]);
+          },
+          async clear() {
+            return enqueue("provider", "clear", []);
+          },
+        },
+      },
+    };
+  },
+});
 ````
 
 ## File: packages/app/app/utils/sync-service.ts
