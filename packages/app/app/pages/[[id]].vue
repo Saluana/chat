@@ -163,6 +163,7 @@
 </template>
 
 <script setup lang="ts">
+import { uuidv4 } from "~/utils/uuid";
 definePageMeta({
   layout: "chat",
 });
@@ -349,7 +350,7 @@ const retryMessage = async (messageId: string) => {
 };
 
 const branchThread = async (messageId: string) => {
-  const newThreadId = crypto.randomUUID();
+  const newThreadId = uuidv4();
   navigateTo(`/${newThreadId}`);
   await $sync.branchThread(currentThreadId.value, messageId, newThreadId);
 };

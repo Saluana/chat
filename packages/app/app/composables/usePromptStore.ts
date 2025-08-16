@@ -1,5 +1,6 @@
 import { useModelStore } from "./useModelStore";
 import { useThreadsStore } from "./useThreadsStore";
+import { uuidv4 } from "~/utils/uuid";
 
 export interface Prompt {
   threadId: string;
@@ -72,7 +73,7 @@ export const usePromptStore = defineStore("prompt", () => {
     } else {
       // first step
       if (!newChatId.value) {
-        newChatId.value = `new-${crypto.randomUUID()}`;
+        newChatId.value = `new-${uuidv4()}`;
         prompts.value[newChatId.value] = {
           threadId: newChatId.value,
           currentModel: defaultModel,

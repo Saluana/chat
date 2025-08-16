@@ -1,4 +1,5 @@
 import type { Thread } from "../composables/useThreadsStore";
+import { uuidv4 } from "~/utils/uuid";
 import type { PushEvent } from "@nuxflare-chat/api/types";
 import showToast from "./showToast";
 import { useOpenRouterAuth } from "../composables/useOpenRouterAuth";
@@ -393,8 +394,8 @@ export function syncServiceProvider() {
       options?: { name: string; thinkingBudget?: string };
     }) {
       await waitForSync();
-      const threadId = crypto.randomUUID();
-      const messageId = crypto.randomUUID();
+      const threadId = uuidv4();
+      const messageId = uuidv4();
       const title =
         params.title || params.content.substring(0, 50) || "New Chat";
       // Ensure an OpenRouter key is available or prompt to login
@@ -426,7 +427,7 @@ export function syncServiceProvider() {
         openrouterKey = key;
       }
       const pushObj: PushEvent = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         events: [
           {
             type: "new_thread",
@@ -555,7 +556,7 @@ export function syncServiceProvider() {
     async updateThread(id: string, update: any) {
       await waitForSync();
       const pushObj: PushEvent = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         events: [
           {
             type: "update_thread",
@@ -602,12 +603,12 @@ export function syncServiceProvider() {
         openrouterKey = key;
       }
       const pushObj: PushEvent = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         events: [
           {
             type: "new_message",
             data: {
-              id: crypto.randomUUID(),
+              id: uuidv4(),
               threadId: params.threadId,
               data: {
                 content: params.content,
@@ -633,7 +634,7 @@ export function syncServiceProvider() {
     async updateMessage(id: string, update: { data?: any; deleted?: boolean }) {
       await waitForSync();
       const pushObj: PushEvent = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         events: [
           {
             type: "update_message",
@@ -691,7 +692,7 @@ export function syncServiceProvider() {
         openrouterKey = key;
       }
       const pushObj: PushEvent = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         events: [
           {
             type: "run_thread",
@@ -715,7 +716,7 @@ export function syncServiceProvider() {
     ) {
       await waitForSync();
       const pushObj: PushEvent = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         events: [
           {
             type: "branch_thread",

@@ -1,6 +1,70 @@
 export default defineNuxtPlugin({
   name: "sync",
   async setup() {
+    const isClient = typeof window !== "undefined";
+    const hasServiceWorker =
+      isClient && "serviceWorker" in navigator && window.isSecureContext;
+
+    // Fallback provider for environments without SW (e.g., iOS over HTTP)
+    if (!hasServiceWorker) {
+      console.warn(
+        "Service Worker not available (insecure context or unsupported). Running in fallback mode without sync.",
+      );
+      const fallbackKVGet = (k: string) =>
+        (typeof localStorage !== "undefined" && localStorage.getItem(k)) ||
+        null;
+      const fallbackKVSet = (k: string, v: string) => {
+        if (typeof localStorage !== "undefined") localStorage.setItem(k, v);
+        return true;
+      };
+      return {
+        provide: {
+          sync: {
+            async setAuthInfo() {
+              /* no-op */
+            },
+            async newThread() {
+              throw new Error("Sync not available in this environment");
+            },
+            async getThreads() {
+              return [];
+            },
+            async getMessagesForThread() {
+              return [];
+            },
+            async updateThread() {
+              /* no-op */
+            },
+            async sendMessage() {
+              throw new Error("Sync not available in this environment");
+            },
+            async getKV(name: string) {
+              return fallbackKVGet(name);
+            },
+            async setKV(name: string, value: string) {
+              return fallbackKVSet(name, value);
+            },
+            async retryMessage() {
+              /* no-op */
+            },
+            async branchThread() {
+              /* no-op */
+            },
+            async updateMessage() {
+              /* no-op */
+            },
+            async searchThreads() {
+              return [];
+            },
+            async clear() {
+              if (typeof localStorage !== "undefined") localStorage.clear();
+              return true;
+            },
+          },
+        },
+      };
+    }
+
     await navigator.serviceWorker
       .register("SharedService_ServiceWorker.js")
       .then(() => navigator.serviceWorker.ready);

@@ -133,8 +133,9 @@ export class SharedService extends EventTarget {
 
   async #sendPortToClient(message, port) {
     // Return the port to the client via the service worker.
+    if (!("serviceWorker" in navigator)) return;
     const serviceWorker = await navigator.serviceWorker.ready;
-    serviceWorker.active.postMessage(message, [port]);
+    serviceWorker.active?.postMessage(message, [port]);
   }
 
   async #getClientId() {
@@ -162,6 +163,7 @@ export class SharedService extends EventTarget {
     const clientIdPromise = new Promise((res) => {
       sendClient = res;
     });
+    if (!("serviceWorker" in navigator)) return null;
     navigator.serviceWorker.addEventListener("message", (event) => {
       if (event.data?.client_id) return sendClient(event.data.client_id);
       event.data.ports = event.ports;
@@ -176,7 +178,9 @@ export class SharedService extends EventTarget {
     // TODO: It would be better to lock on the clientId+serviceName (passing
     // that lock name in the service request). That would allow independent
     // instance lifetime tracking.
-    await SharedService.#acquireContextLock(clientId);
+    if ("locks" in navigator) {
+      await SharedService.#acquireContextLock(clientId);
+    }
 
     return clientId;
   }
@@ -279,7 +283,7 @@ export class SharedService extends EventTarget {
             const providerPort = await this.#providerPort;
             return new Promise((resolve, reject) => {
               this.providerCallbacks.set(nonce, { resolve, reject });
-              providerPort.postMessage({ nonce, method, args });
+              providerPort?.postMessage({ nonce, method, args });
             }).finally(() => {
               this.providerCallbacks.delete(nonce);
             });
@@ -319,9 +323,11 @@ export function createSharedServicePort(target) {
 
     // The port requester holds a lock while using the channel. When the
     // lock is released by the requester, clean up the port on this side.
-    navigator.locks.request(clientId, () => {
-      port1.close();
-    });
+    if ("locks" in navigator) {
+      navigator.locks.request(clientId, () => {
+        port1.close();
+      });
+    }
 
     port1.addEventListener("message", async ({ data }) => {
       const response = { nonce: data.nonce };

@@ -178,7 +178,7 @@
           class="h-32 rounded-xl animate-pulse bg-neutral-200/60 dark:bg-neutral-800/60"
         />
       </div>
-      <div v-else class="flex-1 min-h-0 overflow-hidden">
+      <div v-else class="flex-1 min-h-0 overflow-hidden flex flex-col">
         <div
           v-if="filteredCatalog.length === 0"
           class="py-12 text-center text-neutral-500"
@@ -189,12 +189,13 @@
           >
         </div>
 
-        <div v-else class="flex-1 min-h-0">
+        <div v-else class="flex-1 min-h-0 flex flex-col">
           <div
             ref="listContainer"
             class="flex-1 min-h-0 overflow-auto pr-2 pb-2 overscroll-contain"
-            style="-webkit-overflow-scrolling: touch"
+            style="-webkit-overflow-scrolling: touch; touch-action: pan-y"
             @scroll="onScroll"
+            @wheel.passive="onWheel"
           >
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 lg:gap-4">
               <div
@@ -412,6 +413,17 @@ function onScroll(e?: Event) {
   }
 }
 
+// Prevent wheel events from bubbling to the page when the inner list can scroll
+function onWheel(e: WheelEvent) {
+  const el = listContainer.value;
+  if (!el) return;
+  const atTop = el.scrollTop === 0;
+  const atBottom = Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight;
+  if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom)) {
+    e.stopPropagation();
+  }
+}
+
 function applyFilters() {
   const params: string[] = [];
   if (needsReasoning.value) params.push("reasoning");
@@ -516,7 +528,6 @@ onMounted(async () => {
     width: document.body.style.width,
   };
   document.body.style.overflow = "hidden";
-  document.body.style.touchAction = "none";
   document.body.style.position = "fixed";
   document.body.style.top = `-${lockedScrollY}px`;
   document.body.style.left = "0";
