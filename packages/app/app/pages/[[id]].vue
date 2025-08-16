@@ -182,16 +182,9 @@ onMounted(() =>
 
 onMounted(async () => {
   const endpoint = useRuntimeConfig().public.apiUrl;
-  const token = getAccessToken();
-  if (token && endpoint) {
-    $sync.setAuthInfo(endpoint, token as string);
-  } else {
-    console.error("Missing token or API endpoint for WebSocket connection.");
-  }
 });
 
-const session = useAuth().sessionState;
-const userName = computed(() => session.value.user?.name.split(" ")[0]);
+const userName = "User";
 
 const selectedPrompt = ref<any>(null);
 
@@ -280,7 +273,6 @@ const sendMessage = async (text: string) => {
           {
             method: "PUT",
             headers: {
-              Authentication: `Bearer ${getAccessToken()}`,
               "content-type": file.type,
             },
             body: file,

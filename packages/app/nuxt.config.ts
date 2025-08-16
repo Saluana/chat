@@ -40,7 +40,13 @@ export default defineNuxtConfig({
       authUrl: "https://auth.chat.nuxflare.com",
       authClientID: "nuxflare-chat",
       sessionInterval: 5 * 60 * 1000,
+      openRouterRedirectUri: process.env.OPENROUTER_REDIRECT_URI || "",
     },
+    openRouterClientId: process.env.OPENROUTER_CLIENT_ID || "",
+    openRouterClientSecret: process.env.OPENROUTER_CLIENT_SECRET || "",
+    openRouterAuthUrl: process.env.OPENROUTER_AUTH_URL || "",
+    openRouterTokenUrl: process.env.OPENROUTER_TOKEN_URL || "",
+    openRouterUserinfoUrl: process.env.OPENROUTER_USERINFO_URL || "",
   },
   css: ["~/assets/css/main.css"],
   svgo: {

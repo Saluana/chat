@@ -18,6 +18,16 @@ new_sqlite_classes = ["User", "Stream"]
 binding = "BLOB"
 bucket_name = "blobs"
 
+# OpenRouter env bindings
+[vars]
+# Client ID and secret for OpenRouter OAuth
+OPENROUTER_CLIENT_ID = ""
+OPENROUTER_CLIENT_SECRET = ""
+OPENROUTER_AUTH_URL = ""
+OPENROUTER_TOKEN_URL = ""
+OPENROUTER_USERINFO_URL = ""
+OPENROUTER_REDIRECT_URI = ""
+
 [[rules]] 
 type = "Text"
 globs = ["**/*.sql", "**/*.md"]

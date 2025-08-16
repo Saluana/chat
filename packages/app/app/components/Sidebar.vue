@@ -108,7 +108,12 @@ const { settingsRef } = useSettingsRef();
 const emit = defineEmits(["toggle", "new"]);
 const pop = useTemplateRef("pop");
 
-const user = useAuth().sessionState;
+const user = ref({
+  user: {
+    name: "User",
+    image: "path/to/image.jpg",
+  },
+});
 const name = computed(() => user.value.user?.name);
 const image = computed(() => user.value.user?.image);
 const { width } = useElementBounding(pop);
@@ -131,8 +136,7 @@ const actions = [
     icon: "i-heroicons-solid:logout",
     name: "Logout",
     action: async () => {
-      await useSession().clear();
-      navigateTo("/login");
+      console.log("implement");
     },
   },
 ];

@@ -4,10 +4,8 @@ import { drizzle, DrizzleSqliteDODatabase } from "drizzle-orm/durable-sqlite";
 import { DurableObject } from "cloudflare:workers";
 import { migrate } from "drizzle-orm/durable-sqlite/migrator";
 import migrations from "./drizzle/migrations";
-import { createClient } from "@openauthjs/openauth/client";
 // @ts-ignore
 import systemPrompt from "./system-prompt.md";
-import { subjects, type SubjectUser } from "@nuxflare-chat/common/auth";
 import * as schema from "./schema";
 import { sql } from "drizzle-orm";
 import * as v from "valibot";
@@ -15,47 +13,16 @@ import { PushEvent, SyncEvent, PushEventSchema } from "./types";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { streamText } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import { createOpenAI } from "@ai-sdk/openai";
-import { createAnthropic } from "@ai-sdk/anthropic";
 
-let authUrl: string;
-let authClientID: string;
+// Authless: use a single global durable object namespace and random blob IDs.
 
-let _client: ReturnType<typeof createClient>;
-const getClient = () => {
-  if (_client) return _client;
-  return (_client = createClient({
-    // TODO: make sure cert gets cached correctly in worker?
-    issuer: authUrl,
-    clientID: authClientID,
-  }));
-};
-
-const verifyRequest = async (req: Request) => {
-  const token =
-    req.headers
-      .get("sec-websocket-protocol")
-      ?.split(",")
-      .map((x) => x.trim())[0] ||
-    req.headers.get("authentication")?.slice("Bearer ".length) ||
-    "";
-  const client = getClient();
-  const verified = await client.verify(subjects, token);
-  if (verified.err) throw "token verification error";
-  return verified.subject.properties;
-};
-
-// TODO:
-// reauthentication for live connection? access token expiry and so on.
-// logout from other devices?
+// TODO: keep server minimal and stateless; no authentication layer.
 
 export class User extends DurableObject {
   storage: DurableObjectStorage;
   db: DrizzleSqliteDODatabase<typeof schema>;
   clock: number;
-  user: SubjectUser;
   env: Env;
   miniBucket: any;
 
@@ -64,8 +31,6 @@ export class User extends DurableObject {
     this.storage = ctx.storage;
     this.env = env;
     this.db = drizzle(this.storage, { logger: false, schema });
-    authUrl = env.AUTH_URL;
-    authClientID = env.AUTH_CLIENT_ID;
     ctx.blockConcurrencyWhile(async () => {
       this.clock = (await this.storage.get<number>("clock")) || 0;
       await this.#migrate();
@@ -97,14 +62,6 @@ export class User extends DurableObject {
 
   async fetch(request: Request): Promise<Response> {
     const app = new Hono<{ Bindings: Env }>();
-    app.use(async (c, next) => {
-      try {
-        this.user = await verifyRequest(c.req.raw);
-        await next();
-      } catch {
-        return c.text("", 403);
-      }
-    });
     app.get("/pull", async (c) => {
       const clockParam = c.req.query("clock");
       const clock = typeof clockParam === "string" ? Number(clockParam) : -1;
@@ -122,11 +79,29 @@ export class User extends DurableObject {
       return c.json({ threads, messages, kvs });
     });
     app.post("/push", async (c) => {
+      const body = await c.req.json();
       const { id: _requestId, events } = await v.parseAsync(
         PushEventSchema,
-        c.req.json(),
+        body,
       );
+      // Enforce that any run_thread event includes an OpenRouter API key in options.openrouterApiKey
+      for (const ev of events) {
+        if (ev.type === "run_thread") {
+          const opts = ev.data?.options;
+          if (
+            !opts ||
+            typeof opts !== "object" ||
+            typeof (opts as any)["openrouterApiKey"] !== "string"
+          ) {
+            return c.text(
+              "OpenRouter API key is required in event.data.options.openrouterApiKey for run_thread events",
+              400,
+            );
+          }
+        }
+      }
       this.#processEvents(events);
+      return c.text("ok", 200);
     });
     app.all("*", (c) => {
       if (c.req.header("Upgrade") === "websocket") {
@@ -440,30 +415,14 @@ export class User extends DurableObject {
 
           (async () => {
             try {
-              const [
-                openrouterApiKey,
-                geminiApiKey,
-                openaiApiKey,
-                anthropicApiKey,
-              ] = await Promise.all([
-                this.db.query.kv.findFirst({
-                  where: (kv, { eq }) => eq(kv.name, "openrouter_api_key"),
-                }),
-                this.db.query.kv.findFirst({
-                  where: (kv, { eq }) => eq(kv.name, "gemini_api_key"),
-                }),
-                this.db.query.kv.findFirst({
-                  where: (kv, { eq }) => eq(kv.name, "openai_api_key"),
-                }),
-                this.db.query.kv.findFirst({
-                  where: (kv, { eq }) => eq(kv.name, "anthropic_api_key"),
-                }),
-              ]);
+              const openrouterApiKeyFromDb = await this.db.query.kv.findFirst({
+                where: (kv, { eq }) => eq(kv.name, "openrouter_api_key"),
+              });
               const keys = {
-                openrouter: openrouterApiKey?.value || "",
-                gemini: geminiApiKey?.value || "",
-                openai: openaiApiKey?.value || "",
-                anthropic: anthropicApiKey?.value || "",
+                openrouter:
+                  (options && (options as any)["openrouterApiKey"]) ||
+                  openrouterApiKeyFromDb?.value ||
+                  "",
               };
               const { content, reasoning } = await streamStub.init(
                 formattedMessages,
@@ -735,6 +694,22 @@ export class User extends DurableObject {
         PushEventSchema,
         msgObj,
       );
+      // Validate run_thread events include OpenRouter API key
+      for (const ev of events) {
+        if (ev.type === "run_thread") {
+          const opts = ev.data?.options;
+          if (
+            !opts ||
+            typeof opts !== "object" ||
+            typeof (opts as any)["openrouterApiKey"] !== "string"
+          ) {
+            console.error(
+              "Missing OpenRouter API key for run_thread over websocket",
+            );
+            return;
+          }
+        }
+      }
       this.#processEvents(events);
     } catch (err) {
       console.error("Message processing error:", err);
@@ -774,28 +749,14 @@ export class Stream extends DurableObject {
     this.reasoning = "";
     try {
       const getModel = (name: string) => {
-        // use base model name for provider specific api keys
-        const baseModelName = name.match(/.*\/([^:]*):?.*/)?.[1] || "";
-        if (name.startsWith("google/") && keys.gemini) {
-          return createGoogleGenerativeAI({ apiKey: keys.gemini })(
-            baseModelName,
-            {
-              useSearchGrounding: !!options.webSearch,
-            },
-          );
-        }
-        if (name.startsWith("openai/") && keys.openai) {
-          return createOpenAI({ apiKey: keys.openai })(baseModelName);
-        }
-        if (name.startsWith("anthropic/") && keys.anthropic) {
-          return createAnthropic({ apiKey: keys.anthropic })(baseModelName);
-        }
+        // Only OpenRouter is supported. Require the OpenRouter API key.
         if (!keys.openrouter) {
           throw new Error(
             `OpenRouter API key is required to use model "${name}". Please set your OpenRouter API key in settings to use this model.`,
           );
         }
-        return createOpenRouter({ apiKey: keys.openrouter })(options.name);
+        // Pass the full model name through to OpenRouter provider.
+        return createOpenRouter({ apiKey: keys.openrouter })(name);
       };
 
       const streamConfig: any = {
@@ -803,12 +764,7 @@ export class Stream extends DurableObject {
         messages,
         system: systemPrompt.replaceAll("{{time}}", new Date().toISOString()),
         providerOptions: {
-          // TODO: set thinking budget and other options for all providers
-          google: {
-            thinkingConfig: {
-              includeThoughts: true,
-            },
-          },
+          // OpenRouter-specific options
           openrouter: {
             reasoning: {
               effort: options.thinkingBudget || "low",
@@ -935,18 +891,13 @@ export class Stream extends DurableObject {
       });
     } catch (error) {
       console.error("Stream fetch error:", error);
-      return new Response("Unauthorized or error occurred", { status: 403 });
+      return new Response("An error occurred", { status: 500 });
     }
   }
 }
 
 const app = new Hono<{ Bindings: Env }>();
 app.use(cors());
-app.use(async (ctx, next) => {
-  authUrl = ctx.env.AUTH_URL;
-  authClientID = ctx.env.AUTH_CLIENT_ID;
-  await next();
-});
 app.get("/stream/:id", async (c) => {
   const binding = c.env.STREAM;
   const stub = binding.get(binding.idFromName(c.req.param("id")));
@@ -954,8 +905,7 @@ app.get("/stream/:id", async (c) => {
   return res;
 });
 app.put("/blob", async (c) => {
-  const user = await verifyRequest(c.req.raw);
-  const id = user.id + "/" + crypto.randomUUID();
+  const id = crypto.randomUUID();
   const contentType = c.req.header("content-type");
   if (!contentType) {
     return c.text("content-type header is required", 400);
@@ -977,13 +927,8 @@ app.put("/blob", async (c) => {
   return c.json({ id }, 200);
 });
 app.all("*", async (c) => {
-  try {
-    const user = await verifyRequest(c.req.raw);
-    const binding = c.env.USER;
-    const stub = binding.get(binding.idFromName(user.id));
-    return await stub.fetch(c.req.raw);
-  } catch {
-    c.text("", 403);
-  }
+  const binding = c.env.USER;
+  const stub = binding.get(binding.idFromName("global"));
+  return await stub.fetch(c.req.raw);
 });
 export default app;

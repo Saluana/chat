@@ -10,8 +10,6 @@
     "postinstall": "nuxt prepare"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^1.2.12",
-    "@ai-sdk/openai": "^1.3.22",
     "@nuxflare-chat/api": "workspace:*",
     "@nuxflare-chat/common": "workspace:*",
     "@nuxt/fonts": "0.11.4",
