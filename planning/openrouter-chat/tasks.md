@@ -37,18 +37,18 @@ artifact_id: d2b0b0d7-9f1a-4df6-b0ca-8ac3af5a0d6f
 
 ## 4. New Thread Flow and UX Polish
 
-- [ ] Event order fix in newThread: new_thread → new_message → run_thread.
+- [x] Event order fix in newThread: new_thread → new_message → run_thread.
   - Requirements: 4
-- [ ] Await local thread presence before navigating.
+- [x] Await local thread presence before navigating.
   - Requirements: 4
-- [ ] Fix not-found guard in `[[id]].vue` to only show when thread exists and is deleted.
+- [x] Fix not-found guard in `[[id]].vue` to only show when thread exists and is deleted.
   - Requirements: 4, 7
 
 ## 5. Streaming and Attachments
 
-- [ ] Ensure Stream DO writes partial content and final message; error path writes partials + error.
+- [x] Ensure Stream DO writes partial content and final message; error path writes partials + error.
   - Requirements: 5, 7
-- [ ] Validate attachments upload (PUT /blob) and server-side inclusion in formatted messages (image/file types).
+- [x] Validate attachments upload (PUT /blob) and server-side inclusion in formatted messages (image/file types).
   - Requirements: 5
 
 ## 6. Settings & Indicator
