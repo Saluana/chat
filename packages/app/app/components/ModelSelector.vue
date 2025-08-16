@@ -4,7 +4,7 @@
     :searchInput="false"
     color="neutral"
     variant="ghost"
-    :items="models"
+    :items="selectorItems"
     :content="{ align: 'start' }"
     :ui="{
       base: 'w-auto cursor-pointer text-neutral-700 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white light:hover:bg-neutral-200 dark:hover:bg-neutral-700/70',
@@ -41,7 +41,7 @@
 const promptStore = usePromptStore();
 const { currentModel } = storeToRefs(promptStore);
 const modelStore = useModelStore();
-const { models } = storeToRefs(modelStore);
+const { models, selectedModels } = storeToRefs(modelStore);
 
 const icons = ref([
   {
@@ -91,4 +91,54 @@ const getModelIcons = (model: any) => {
 };
 
 const emit = defineEmits(["changeModel"]);
+
+// Build selector items: prefer user's selected models (mapped) else fallback to default static models
+const selectorItems = computed(() => {
+  const list = selectedModels.value || [];
+  if (Array.isArray(list) && list.length) {
+    return list.map((m: any) => ({
+      label: m?.name || m?.id || "model",
+      apiModel: m?.id,
+      // derive capabilities from OpenRouter model shape
+      imageUploads: Array.isArray(m?.architecture?.input_modalities)
+        ? m.architecture.input_modalities.includes("image")
+        : false,
+      webSearch: Array.isArray(m?.supported_parameters)
+        ? m.supported_parameters.includes("web_search")
+        : false,
+      pdfUploads: false,
+      reasoningAbility: Array.isArray(m?.supported_parameters)
+        ? m.supported_parameters.includes("reasoning")
+        : false,
+      generateImage: false,
+      keyPlatforms: ["openrouter"],
+    }));
+  }
+  return models.value;
+});
+
+// Ensure currentModel remains valid when the available items change
+watch(
+  selectorItems,
+  (items) => {
+    if (!items || !items.length) return;
+    const cur = currentModel.value as any;
+    const same = items.find(
+      (x: any) => x?.apiModel === cur?.apiModel || x?.label === cur?.label,
+    );
+    if (!same) currentModel.value = items[0] as any;
+  },
+  { immediate: true },
+);
+
+onMounted(async () => {
+  // Make sure models and selection are loaded after a page refresh
+  try {
+    // fetchModels fills catalog for selectedModels mapping; cheap if cached
+    await modelStore.fetchModels();
+  } catch {}
+  try {
+    await modelStore.loadSelection();
+  } catch {}
+});
 </script>

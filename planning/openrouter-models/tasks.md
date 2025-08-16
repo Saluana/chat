@@ -6,27 +6,27 @@ artifact_id: 8a7d5b36-6a0e-4e4e-8a2c-6f07a64c5a41
 
 ## 1. Models API client
 
-- [ ] Create ModelsService to GET https://openrouter.ai/api/v1/models (attach Authorization if key exists).
+- [x] Create ModelsService to GET https://openrouter.ai/api/v1/models (attach Authorization if key exists).
   - Requirements: 1
-- [ ] Map API response to OpenRouterModel; cache in localStorage with fetchedAt.
+- [x] Map API response to OpenRouterModel; cache in localStorage with fetchedAt.
   - Requirements: 4
-- [ ] Add simple filter helpers (by text, modalities, context length, parameters, price buckets).
+- [x] Add simple filter helpers (by text, modalities, context length, parameters, price buckets).
   - Requirements: 1
 
 ## 2. Extend Pinia Model Store
 
-- [ ] Add catalog state, selectedModelIds, getters, and actions: fetchModels(), filterModels(), toggleSelected(), saveSelection(), loadSelection().
+- [x] Add catalog state, selectedModelIds, getters, and actions: fetchModels(), filterModels(), toggleSelected(), saveSelection(), loadSelection().
   - Requirements: 1, 2
-- [ ] Persist selectedModelIds to localStorage + KV (`openrouter_selected_models`).
+- [x] Persist selectedModelIds to localStorage + KV (`openrouter_selected_models`).
   - Requirements: 2
 
 ## 3. Settings UI: Model Catalog
 
-- [ ] Add a new Settings panel: search bar, filter chips, Refresh button.
+- [x] Add a new Settings panel: search bar, filter chips, Refresh button.
   - Requirements: 1, 4
-- [ ] Render model cards with select checkbox/star, key badges (image/text), context length and price. Virtualize list if > 200 items.
+- [x] Render model cards with select checkbox/star, key badges (image/text), context length and price. Virtualize list if > 200 items.
   - Requirements: 1
-- [ ] Save selection to store (localStorage + KV) and toast success.
+- [x] Save selection to store (localStorage + KV) and toast success.
   - Requirements: 2, 5
 
 ## 4. Chat Dropdown Integration

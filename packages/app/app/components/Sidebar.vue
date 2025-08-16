@@ -3,7 +3,7 @@
     class="flex flex-col p-0 h-screen overflow-y-auto scrollbar-custom relative sidebar-bg"
   >
     <div class="sticky top-0 p-5 space-y-4 z-10 sidebar-bg">
-      <div class="w-full flex w-full justify-between items-center">
+      <div class="w-full flex justify-between items-center">
         <UButton
           icon="i-lucide-panel-left"
           variant="ghost"
@@ -143,6 +143,7 @@
 </template>
 
 <script setup lang="ts">
+import { useOpenRouterAuth } from "../composables/useOpenRouterAuth";
 const route = useRoute();
 const { searchRef } = useSearchRef();
 const { settingsRef } = useSettingsRef();
@@ -164,23 +165,51 @@ const cssVars = computed(() => ({
   "--width": `${width.value}px`,
 }));
 
-const actions = [
-  {
-    icon: "i-lucide:settings",
-    name: "Settings",
-    action: () => {
-      settingsRef.value = true;
-      popperOpen.value = false;
+const { startLogin, logoutOpenRouter } = useOpenRouterAuth?.() || {
+  startLogin: () => {},
+  logoutOpenRouter: () => {},
+};
+
+const actions = computed(() => {
+  const base = [
+    {
+      icon: "i-lucide:settings",
+      name: "Settings",
+      action: () => {
+        settingsRef.value = true;
+        popperOpen.value = false;
+      },
     },
-  },
-  {
-    icon: "i-heroicons-solid:logout",
-    name: "Logout",
-    action: async () => {
-      console.log("implement");
-    },
-  },
-];
+  ];
+  if (openrouterConnected.value) {
+    base.push({
+      icon: "i-heroicons-solid:logout",
+      name: "Logout",
+      action: async () => {
+        popperOpen.value = false;
+        try {
+          await logoutOpenRouter();
+        } catch (e) {
+          console.error(e);
+        }
+      },
+    });
+  } else {
+    base.push({
+      icon: "i-carbon:login",
+      name: "Login with OpenRouter",
+      action: async () => {
+        popperOpen.value = false;
+        try {
+          await startLogin();
+        } catch (e) {
+          console.error(e);
+        }
+      },
+    });
+  }
+  return base;
+});
 
 const threadsStore = useThreadsStore();
 const {
