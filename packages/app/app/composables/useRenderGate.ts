@@ -2,7 +2,7 @@
 // Usage: const { isReady, markReady, reset } = useRenderGate()
 
 export function useRenderGate() {
-  const state = useState<Record<string, boolean>>('render-gate', () => ({}));
+  const state = useState<Record<string, boolean>>("render-gate", () => ({}));
 
   function markReady(id: string) {
     if (!id) return;
@@ -17,7 +17,7 @@ export function useRenderGate() {
   function isReady(id: string | undefined | null) {
     if (!id) return false;
     return !!state.value[id];
-    }
+  }
 
   return { isReady, markReady, reset };
 }

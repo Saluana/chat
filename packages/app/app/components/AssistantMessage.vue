@@ -1,10 +1,10 @@
 <template>
   <div>
-  <Reasoning
-        class="mb-2"
-        v-if="reasoning?.length && contentReady"
-        :content="reasoning"
-      />
+    <Reasoning
+      class="mb-2"
+      v-if="reasoning?.length && contentReady"
+      :content="reasoning"
+    />
     <div class="flex flex-col">
       <VueSpinnerDots
         v-if="message.stream_id && !reasoning?.length && !content?.length"
@@ -37,10 +37,10 @@ const reasoning = computed(() =>
 );
 const streamContent = ref("");
 const streamReasoning = ref("");
-  const { isReady, markReady, reset } = useRenderGate();
-  const contentReady = computed(() => isReady(message.id));
+const { isReady, markReady, reset } = useRenderGate();
+const contentReady = computed(() => isReady(message.id));
 const onRendered = () => {
-    markReady(message.id);
+  markReady(message.id);
 };
 const config = useRuntimeConfig();
 
@@ -72,7 +72,7 @@ watch(
   () => message.stream_id,
   (streamId) => {
     if (streamId) {
-        reset(message.id);
+      reset(message.id);
       streamReasoning.value = "";
       streamContent.value = "";
       fetchStream(streamId, streamContent);
