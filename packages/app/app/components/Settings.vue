@@ -1,12 +1,12 @@
 <template>
   <div
-    class="w-full md:w-[900px] max-w-[1000px] p-4 lg:p-6 flex flex-col gap-4 lg:gap-6 bg-neutral-100/40 dark:bg-neutral-700/30 backdrop-blur-md rounded-xl max-h-[90vh] overflow-hidden"
+    class="w-[98vw] md:w-[900px] md:max-w-[1000px] p-4 lg:p-6 flex flex-col gap-3 lg:gap-4 bg-neutral-100/40 dark:bg-neutral-700/30 backdrop-blur-md rounded-xl max-h-[90vh] overflow-hidden min-h-0 overscroll-contain"
   >
     <UAccordion
       :items="categoryList"
       :ui="{
         root: 'w-full',
-        item: 'p-2 my-3 rounded-lg ring ring-neutral-300/40 dark:ring-neutral-700/40 bg-white dark:bg-neutral-900',
+        item: 'p-2 my-2 rounded-lg ring ring-neutral-300/40 dark:ring-neutral-700/40 bg-white dark:bg-neutral-900',
         trigger: 'cursor-pointer p-0.5',
         leadingIcon: '',
       }"
@@ -82,9 +82,9 @@
 
     <!-- Models Catalog Panel -->
     <div
-      class="w-full mt-2 p-3 lg:p-4 rounded-lg ring ring-neutral-300/40 dark:ring-neutral-700/40 bg-white dark:bg-neutral-900"
+      class="w-full mt-1 p-3 lg:p-4 rounded-lg ring ring-neutral-300/40 dark:ring-neutral-700/40 bg-white dark:bg-neutral-900 flex flex-col min-h-0 flex-1 overflow-hidden"
     >
-      <div class="flex items-center justify-between gap-3 mb-4">
+      <div class="flex items-center justify-between gap-3 mb-3">
         <div class="flex items-center gap-3 w-full">
           <UInput
             v-model="query"
@@ -118,7 +118,7 @@
       </div>
 
       <!-- Filter chips -->
-      <div class="flex flex-wrap items-center gap-2 mb-4">
+      <div class="flex flex-wrap items-center gap-2 mb-3">
         <button
           class="px-3 py-1.5 rounded-full text-xs font-medium border border-neutral-300/50 dark:border-neutral-700/50 hover:bg-neutral-100/60 dark:hover:bg-neutral-800/60"
           :class="{
@@ -178,7 +178,7 @@
           class="h-32 rounded-xl animate-pulse bg-neutral-200/60 dark:bg-neutral-800/60"
         />
       </div>
-      <div v-else>
+      <div v-else class="flex-1 min-h-0 overflow-hidden">
         <div
           v-if="filteredCatalog.length === 0"
           class="py-12 text-center text-neutral-500"
@@ -189,11 +189,11 @@
           >
         </div>
 
-        <div v-else>
+        <div v-else class="flex-1 min-h-0">
           <div
             ref="listContainer"
-            :style="{ maxHeight: listMaxHeight }"
-            class="overflow-auto pr-2 pb-3"
+            class="flex-1 min-h-0 overflow-auto pr-2 pb-2 overscroll-contain"
+            style="-webkit-overflow-scrolling: touch"
             @scroll="onScroll"
           >
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 lg:gap-4">
@@ -269,7 +269,7 @@
         </div>
       </div>
 
-      <div class="mt-6 flex items-center justify-between">
+      <div class="mt-4 flex items-center justify-between">
         <p class="text-xs text-neutral-500">
           Selected: {{ selectedModelIds.length }}
         </p>
@@ -287,6 +287,18 @@ declare const useAuth: any;
 
 import { useOpenRouterAuth } from "../composables/useOpenRouterAuth";
 import showToast from "~/utils/showToast";
+
+// Track original body styles for scroll lock restore
+let lockedScrollY: number = 0;
+let originalBodyStyle: {
+  overflow?: string;
+  touchAction?: string;
+  position?: string;
+  top?: string;
+  left?: string;
+  right?: string;
+  width?: string;
+} = {};
 
 const user =
   typeof useAuth === "function"
@@ -364,11 +376,7 @@ const limitedCatalog = computed(() =>
 );
 
 // compute a max-height for the inner list so the entire modal fits inside 90vh
-const listMaxHeight = computed(() => {
-  // root vertical paddings + header areas approx in px; keep conservative
-  // 90vh (root) minus ~220px for header/filters/footer/paddings
-  return typeof window !== "undefined" ? `calc(90vh - 220px)` : "70vh";
-});
+// height handled via flex layout (panel flex-col + list flex-1 min-h-0)
 
 function updateCols() {
   const w = listContainer.value?.clientWidth || 0;
@@ -496,6 +504,25 @@ async function save() {
 }
 
 onMounted(async () => {
+  // Lock background scroll while the modal is open (mobile-safe, incl. iOS)
+  lockedScrollY = window.scrollY || window.pageYOffset || 0;
+  originalBodyStyle = {
+    overflow: document.body.style.overflow,
+    touchAction: document.body.style.touchAction,
+    position: document.body.style.position,
+    top: document.body.style.top,
+    left: document.body.style.left,
+    right: document.body.style.right,
+    width: document.body.style.width,
+  };
+  document.body.style.overflow = "hidden";
+  document.body.style.touchAction = "none";
+  document.body.style.position = "fixed";
+  document.body.style.top = `-${lockedScrollY}px`;
+  document.body.style.left = "0";
+  document.body.style.right = "0";
+  document.body.style.width = "100%";
+
   loading.value = true;
   try {
     await Promise.all([modelStore.fetchModels(), modelStore.loadSelection()]);
@@ -514,6 +541,23 @@ onMounted(async () => {
     document.addEventListener("visibilitychange", () => {
       if (document.visibilityState === "visible") checkOpenRouterKey();
     });
+  }
+});
+
+onBeforeUnmount(() => {
+  // Restore body scroll when modal closes
+  if (originalBodyStyle) {
+    document.body.style.overflow = originalBodyStyle.overflow || "";
+    document.body.style.touchAction = originalBodyStyle.touchAction || "";
+    document.body.style.position = originalBodyStyle.position || "";
+    document.body.style.top = originalBodyStyle.top || "";
+    document.body.style.left = originalBodyStyle.left || "";
+    document.body.style.right = originalBodyStyle.right || "";
+    document.body.style.width = originalBodyStyle.width || "";
+  }
+  // Restore scroll position
+  if (typeof window !== "undefined") {
+    window.scrollTo(0, lockedScrollY || 0);
   }
 });
 </script>
