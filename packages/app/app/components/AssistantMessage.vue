@@ -29,11 +29,14 @@
 import { VueSpinnerDots } from "vue3-spinners";
 
 const { message } = defineProps<{ message: any }>();
+// Prefer streaming refs when active; otherwise fall back to structured data then plain content.
 const content = computed(() =>
-  message.stream_id ? streamContent.value : message.data?.content,
+  message.stream_id
+    ? streamContent.value
+    : (message?.data?.content ?? message?.content ?? ""),
 );
 const reasoning = computed(() =>
-  message.stream_id ? streamReasoning.value : message.data?.reasoning,
+  message.stream_id ? streamReasoning.value : message?.data?.reasoning,
 );
 const streamContent = ref("");
 const streamReasoning = ref("");

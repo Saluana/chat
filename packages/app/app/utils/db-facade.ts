@@ -1,12 +1,7 @@
 // Lightweight DB facade: caches thread previews in IndexedDB with a localStorage fallback
 // No runtime deps; can be swapped to Dexie later without changing callsites.
 
-export type ThreadPreview = {
-  id: string;
-  title: string;
-  pinned?: boolean;
-  updatedAt?: number;
-};
+import type { ThreadPreview } from "./preview-cache";
 
 const IDB_DB = "nuxflare-cache-v1";
 const IDB_STORE = "threads_preview";

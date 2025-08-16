@@ -19,6 +19,8 @@ const getThreadTime = (thread: any) => {
   return Math.max(thread.created_at, thread.last_message_at);
 };
 
+import { dbExec, useRuntimeConfig, useNuxtApp } from "#imports";
+
 export const useThreadsStore = defineStore("threads", () => {
   const threads = ref<Record<string, Thread>>({});
   const activeThread = ref<string | null>(null);
@@ -158,8 +160,94 @@ export const useThreadsStore = defineStore("threads", () => {
               "[ThreadsDebug] fetching messages for thread",
               threadId,
             );
-            const msgs = ((await $sync.getMessagesForThread?.(threadId)) ??
-              []) as any[];
+            const withTimeout = async <T>(
+              p: Promise<T>,
+              ms = 900,
+            ): Promise<T | undefined> => {
+              return await Promise.race([
+                p.then((v) => v as T).catch(() => undefined),
+                new Promise<undefined>((res) => setTimeout(res, ms)),
+              ]);
+            };
+            let msgs = ((await withTimeout(
+              $sync.getMessagesForThread?.(threadId) as any,
+            )) ?? []) as any[];
+            if (!Array.isArray(msgs)) msgs = [];
+            if (Array.isArray(msgs)) {
+              console.log(
+                "[ThreadsDebug] provider returned count=",
+                msgs.length,
+              );
+            }
+            // Fallback to local OPFS DB if provider not ready/available
+            if (!Array.isArray(msgs) || msgs.length === 0) {
+              try {
+                // dbExec is auto-imported by Nuxt from the database worker
+                const res = await (dbExec as any)({
+                  sql: `SELECT id, role, content, data, created_at, updated_at, error, deleted, thread_id, clock, stream_id, message_index
+                        FROM messages WHERE thread_id = ? AND deleted = 0
+                        ORDER BY message_index ASC, created_at ASC`,
+                  bindings: [threadId],
+                });
+                if (res && Array.isArray(res.rows)) {
+                  msgs = res.rows.map((row: any[]) => ({
+                    id: row[0],
+                    role: row[1],
+                    content: row[2],
+                    data: row[3] ? JSON.parse(row[3]) : null,
+                    created_at: Number(row[4]),
+                    updated_at: Number(row[5]),
+                    error: row[6],
+                    deleted: !!row[7],
+                    thread_id: row[8],
+                    clock: row[9] !== null ? Number(row[9]) : undefined,
+                    stream_id: row[10] || "",
+                    index: row[11] !== null ? Number(row[11]) : 0,
+                  }));
+                }
+              } catch (fallbackErr) {
+                console.warn(
+                  "[ThreadsDebug] OPFS fallback failed for messages",
+                  fallbackErr,
+                );
+              }
+            }
+            // Final fallback: fetch from backend pull API, filter by thread
+            if (!Array.isArray(msgs) || msgs.length === 0) {
+              try {
+                const endpoint = useRuntimeConfig().public.apiUrl;
+                const resp = await fetch(`${endpoint}/pull?clock=0`, {
+                  headers: { Authentication: `Bearer public` },
+                });
+                if (resp.ok) {
+                  const data = await resp.json();
+                  const pulledMsgs = Array.isArray(data?.messages)
+                    ? data.messages
+                    : [];
+                  msgs = pulledMsgs
+                    .filter((m: any) => m?.thread_id === threadId)
+                    .map((m: any) => ({
+                      id: m.id,
+                      role: m.role ?? "user",
+                      content: m.content ?? m.data?.content ?? "",
+                      data: m.data ?? null,
+                      created_at: Number(m.created_at ?? 0),
+                      updated_at: Number(m.updated_at ?? 0),
+                      error: m.error,
+                      deleted: !!m.deleted,
+                      thread_id: m.thread_id,
+                      clock: typeof m.clock === "number" ? m.clock : undefined,
+                      stream_id: m.stream_id || "",
+                      index: Number(m.index ?? 0),
+                    }));
+                }
+              } catch (httpErr) {
+                console.warn(
+                  "[ThreadsDebug] HTTP pull fallback failed for messages",
+                  httpErr,
+                );
+              }
+            }
             console.log(
               "[ThreadsDebug] fetched messages for thread",
               threadId,

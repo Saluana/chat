@@ -137,6 +137,7 @@ export default defineNuxtPlugin({
               providerReady = true;
               resolveProviderReady?.();
               flushQueue();
+              console.log("[sync] provider ready");
             } else if (!providerReady) {
               setTimeout(
                 () => checkProvider(Math.min(delay * 1.5, 1000)),
@@ -162,6 +163,7 @@ export default defineNuxtPlugin({
               syncReady = true;
               resolveSyncReady?.();
               flushQueue();
+              console.log("[sync] sync ready");
             } else if (!syncReady) {
               setTimeout(() => checkSync(Math.min(delay * 1.5, 1500)), delay);
             }

@@ -21,6 +21,7 @@ async function log(text) {
 
 // Forward messages (and ports) from client to client.
 const handledNonces = new Set();
+const MAX_NONCES = 10000;
 globalThis.addEventListener("message", async (event) => {
   if (event.data?.get_client_id) {
     event.source.postMessage({
@@ -30,7 +31,18 @@ globalThis.addEventListener("message", async (event) => {
     try {
       const nonce = event.data?.nonce;
       if (nonce && handledNonces.has(nonce)) return;
-      if (nonce) handledNonces.add(nonce);
+      if (nonce) {
+        handledNonces.add(nonce);
+        // Prevent unbounded growth
+        if (handledNonces.size > MAX_NONCES) {
+          const it = handledNonces.values();
+          for (let i = 0; i < Math.ceil(MAX_NONCES / 10); i++) {
+            const v = it.next().value;
+            if (v === undefined) break;
+            handledNonces.delete(v);
+          }
+        }
+      }
       const client = await globalThis.clients.get(event.data.clientId);
       client?.postMessage(event.data, event.ports);
     } catch (e) {

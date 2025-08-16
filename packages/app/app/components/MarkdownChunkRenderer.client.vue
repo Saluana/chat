@@ -21,7 +21,7 @@ const { renderMarkdownChunk } = await import("~/utils/markdown-lazy");
 watch(
   [() => block],
   async () => {
-    if (block) {
+    if (typeof block === "string" && block.length > 0) {
       ready.value = false;
       html.value = await renderMarkdownChunk(block);
       ready.value = true;

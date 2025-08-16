@@ -10,7 +10,7 @@ let baseWithMathLocal: Promise<any> | null = null;
 let enhancedLocal: Promise<any> | null = null;
 // In-memory cache for rendered chunks. Keep this bounded to avoid OOM.
 const chunkCache = new Map<string, string>();
-const CHUNK_CACHE_LIMIT = 500; // max number of cached chunks
+const CHUNK_CACHE_LIMIT = 200; // max number of cached chunks (reduced to curb memory)
 
 // Worker idle shutdown to free memory when unused
 let workerIdleTimer: any = null;
@@ -319,7 +319,12 @@ export async function renderMarkdownChunk(chunk: string): Promise<string> {
   const result = await p;
   processingQueue.delete(hash);
   // Insert into cache and enforce LRU limit
-  chunkCache.set(hash, result);
+  // If the rendered HTML is extremely large, avoid caching to limit memory
+  if (result && result.length > 200_000) {
+    // >200KB html per chunk likely from huge code blocks; skip cache
+  } else {
+    chunkCache.set(hash, result);
+  }
   try {
     if (chunkCache.size > CHUNK_CACHE_LIMIT) {
       // Evict oldest entries (Map preserves insertion order)

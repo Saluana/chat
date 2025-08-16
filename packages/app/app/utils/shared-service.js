@@ -90,6 +90,7 @@ export class SharedService extends EventTarget {
         // request.
         const providerId = await this.#clientId;
         const handledNonces = new Set();
+        const MAX_NONCES = 10000;
         const broadcastChannel = new BroadcastChannel("SharedService");
         broadcastChannel.addEventListener(
           "message",
@@ -101,7 +102,17 @@ export class SharedService extends EventTarget {
               // Deduplicate by nonce to avoid re-sending the same port
               const nonce = data?.nonce;
               if (nonce && handledNonces.has(nonce)) return;
-              if (nonce) handledNonces.add(nonce);
+              if (nonce) {
+                handledNonces.add(nonce);
+                if (handledNonces.size > MAX_NONCES) {
+                  const it = handledNonces.values();
+                  for (let i = 0; i < Math.ceil(MAX_NONCES / 10); i++) {
+                    const v = it.next().value;
+                    if (v === undefined) break;
+                    handledNonces.delete(v);
+                  }
+                }
+              }
 
               // Function to request a fresh client port from provider
               const requestPort = async () =>

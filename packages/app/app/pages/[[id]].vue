@@ -112,13 +112,20 @@
           class="pt-20 flex flex-col gap-6"
           :style="{ paddingBottom: `${chatPromptHeight + 24}px` }"
         >
-          <ChatMessage
-            v-for="message in messagesList"
-            :key="message.id"
-            :message="message"
-            @retryMessage="() => retryMessage(message.id)"
-            @branchThread="() => branchThread(message.id)"
-          />
+          <template v-if="messagesList && messagesList.length">
+            <ChatMessage
+              v-for="message in messagesList"
+              :key="message.id"
+              :message="message"
+              @retryMessage="() => retryMessage(message.id)"
+              @branchThread="() => branchThread(message.id)"
+            />
+          </template>
+          <template v-else-if="currentThreadId">
+            <div class="text-center text-neutral-400 py-10">
+              No messages yet.
+            </div>
+          </template>
           <div
             v-if="uploadingAttachment && currentThreadId"
             class="max-w-[80%] ml-auto flex items-center justify-between gap-2 p-3 rounded-lg ring-1 ring-primary-400/30 dark:ring-0 bg-primary-100/50 dark:bg-neutral-500/20"
