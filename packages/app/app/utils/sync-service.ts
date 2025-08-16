@@ -1,5 +1,7 @@
 import type { Thread } from "../composables/useThreadsStore";
 import type { PushEvent } from "@nuxflare-chat/api/types";
+import showToast from "./showToast";
+import { useOpenRouterAuth } from "../composables/useOpenRouterAuth";
 
 const THREADS_CHANNEL_NAME = "threads-channel";
 const threadsChannel = new BroadcastChannel(THREADS_CHANNEL_NAME);
@@ -395,6 +397,34 @@ export function syncServiceProvider() {
       const messageId = crypto.randomUUID();
       const title =
         params.title || params.content.substring(0, 50) || "New Chat";
+      // Ensure an OpenRouter key is available or prompt to login
+      const keyFromOptions = (params.options as any)?.openrouterApiKey;
+      let openrouterKey: string | null = keyFromOptions ?? null;
+      if (!openrouterKey) {
+        const key = await (async () => {
+          try {
+            const { $sync } = useNuxtApp();
+            const kvKey = await $sync
+              .getKV("openrouter_api_key")
+              .catch(() => null);
+            if (kvKey) return kvKey as string;
+          } catch {}
+          if (typeof window !== "undefined") {
+            const lsKey = localStorage.getItem("openrouter_api_key");
+            if (lsKey) return lsKey;
+          }
+          return null;
+        })();
+        if (!key) {
+          // Prompt to login
+          const { startLogin } = useOpenRouterAuth();
+          showToast("OpenRouter key required. Please login.", "Missing key");
+          // small delay then trigger login action to keep it quick to act
+          setTimeout(() => startLogin(), 50);
+          throw new Error("OpenRouter key missing; blocked send.");
+        }
+        openrouterKey = key;
+      }
       const pushObj: PushEvent = {
         id: crypto.randomUUID(),
         events: [
@@ -403,6 +433,7 @@ export function syncServiceProvider() {
             data: {
               id: threadId,
               title,
+              parent_thread_id: undefined,
             },
           },
           {
@@ -421,12 +452,25 @@ export function syncServiceProvider() {
             type: "run_thread",
             data: {
               threadId,
-              options: params.options,
+              options: {
+                ...(params.options || {}),
+                openrouterApiKey: openrouterKey,
+              } as any,
             },
           },
         ],
       };
       wsSendFunction?.(JSON.stringify(pushObj));
+      // Wait until the thread is present locally to avoid navigating to a missing thread
+      try {
+        const deadline = Date.now() + 4000; // up to 4 seconds
+        // eslint-disable-next-line no-constant-condition
+        while (Date.now() < deadline) {
+          const exists = await api.getThread(threadId);
+          if (exists) break;
+          await new Promise((r) => setTimeout(r, 50));
+        }
+      } catch {}
       return { threadId };
     },
     async getThread(threadId: string): Promise<Thread | null> {
@@ -531,6 +575,32 @@ export function syncServiceProvider() {
       options?: { model: string; thinkingBudget?: string };
     }) {
       await waitForSync();
+      // Ensure an OpenRouter key is available or prompt to login
+      const keyFromOptions = (params.options as any)?.openrouterApiKey;
+      let openrouterKey: string | null = keyFromOptions ?? null;
+      if (!openrouterKey) {
+        const key = await (async () => {
+          try {
+            const { $sync } = useNuxtApp();
+            const kvKey = await $sync
+              .getKV("openrouter_api_key")
+              .catch(() => null);
+            if (kvKey) return kvKey as string;
+          } catch {}
+          if (typeof window !== "undefined") {
+            const lsKey = localStorage.getItem("openrouter_api_key");
+            if (lsKey) return lsKey;
+          }
+          return null;
+        })();
+        if (!key) {
+          const { startLogin } = useOpenRouterAuth();
+          showToast("OpenRouter key required. Please login.", "Missing key");
+          setTimeout(() => startLogin(), 50);
+          throw new Error("OpenRouter key missing; blocked send.");
+        }
+        openrouterKey = key;
+      }
       const pushObj: PushEvent = {
         id: crypto.randomUUID(),
         events: [
@@ -550,7 +620,10 @@ export function syncServiceProvider() {
             type: "run_thread",
             data: {
               threadId: params.threadId,
-              options: params.options,
+              options: {
+                ...(params.options || {}),
+                openrouterApiKey: openrouterKey,
+              } as any,
             },
           },
         ],
@@ -591,6 +664,32 @@ export function syncServiceProvider() {
 
       const threadId = rows[0][0];
 
+      // Ensure an OpenRouter key is available or prompt to login
+      const keyFromOptions = (options as any)?.openrouterApiKey;
+      let openrouterKey: string | null = keyFromOptions ?? null;
+      if (!openrouterKey) {
+        const key = await (async () => {
+          try {
+            const { $sync } = useNuxtApp();
+            const kvKey = await $sync
+              .getKV("openrouter_api_key")
+              .catch(() => null);
+            if (kvKey) return kvKey as string;
+          } catch {}
+          if (typeof window !== "undefined") {
+            const lsKey = localStorage.getItem("openrouter_api_key");
+            if (lsKey) return lsKey;
+          }
+          return null;
+        })();
+        if (!key) {
+          const { startLogin } = useOpenRouterAuth();
+          showToast("OpenRouter key required. Please login.", "Missing key");
+          setTimeout(() => startLogin(), 50);
+          throw new Error("OpenRouter key missing; blocked run.");
+        }
+        openrouterKey = key;
+      }
       const pushObj: PushEvent = {
         id: crypto.randomUUID(),
         events: [
@@ -599,7 +698,10 @@ export function syncServiceProvider() {
             data: {
               threadId,
               messageId,
-              options: options,
+              options: {
+                ...(options || {}),
+                openrouterApiKey: openrouterKey,
+              } as any,
             },
           },
         ],

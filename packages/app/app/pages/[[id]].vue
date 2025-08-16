@@ -1,5 +1,7 @@
 <template>
-  <div v-if="currentThreadId && !(activeThreadObject?.deleted === false)">
+  <div
+    v-if="currentThreadId && activeThreadObject && activeThreadObject.deleted"
+  >
     <div
       class="flex flex-col items-center justify-center min-h-screen text-center gap-5"
     >
@@ -182,6 +184,12 @@ onMounted(() =>
 
 onMounted(async () => {
   const endpoint = useRuntimeConfig().public.apiUrl;
+  try {
+    // Initialize sync service (websocket + pull) so sendMessage/newThread works
+    await $sync.setAuthInfo(endpoint, "public");
+  } catch (e) {
+    console.error("Failed to initialize sync service", e);
+  }
 });
 
 const userName = "User";

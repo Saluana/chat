@@ -85,6 +85,24 @@
                 base: 'bg-primary-700 hover:bg-primary-600 text-white',
               }"
             />
+            <UButton
+              size="lg"
+              color="neutral"
+              variant="outline"
+              label="Login with OpenRouter"
+              class="ml-4 mt-5"
+              type="button"
+              @click.prevent.stop="startLogin"
+            />
+            <UButton
+              size="lg"
+              color="neutral"
+              variant="ghost"
+              label="Logout"
+              class="ml-2 mt-5"
+              type="button"
+              @click.prevent.stop="logout"
+            />
           </div>
         </div>
       </template>
@@ -93,11 +111,41 @@
 </template>
 
 <script setup lang="ts">
-const user = useAuth().sessionState;
+// 'useAuth' may be provided by the app's auth plugin via auto-imports — declare so TS won't error
+declare const useAuth: any;
+
+import { useOpenRouterAuth } from "../composables/useOpenRouterAuth";
+
+const user =
+  typeof useAuth === "function"
+    ? useAuth().sessionState
+    : ref({ value: { user: {} } });
 const name = computed(() => user.value.user?.name);
 const image = computed(() => user.value.user?.image);
 const email = computed(() => user.value.user?.email);
 
 const modelStore = useModelStore();
 const { modelsByCategory } = storeToRefs(modelStore);
+
+const { startLogin, logoutOpenRouter } = useOpenRouterAuth();
+
+// when saving API key manually, also update localStorage and notify UI
+const originalSaveApiKey = modelStore.saveApiKey;
+modelStore.saveApiKey = async (platform: string) => {
+  await originalSaveApiKey(platform);
+  if (platform === "openrouter") {
+    const key = modelStore.modelsByCategory.openrouter.apiKey;
+    if (typeof window !== "undefined") {
+      if (key) localStorage.setItem("openrouter_api_key", key);
+      else localStorage.removeItem("openrouter_api_key");
+      try {
+        window.dispatchEvent(new CustomEvent("openrouter:connected"));
+      } catch {}
+    }
+  }
+};
+
+function logout() {
+  logoutOpenRouter();
+}
 </script>

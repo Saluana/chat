@@ -23,6 +23,8 @@ const ModelOptionsSchema = v.object({
   name: v.string(),
   thinkingBudget: v.optional(v.picklist(["low", "medium", "high"])),
   webSearch: v.optional(v.boolean()),
+  // Allow client to pass OpenRouter API key per request; server requires it for run_thread
+  openrouterApiKey: v.optional(v.string()),
 });
 
 const MessageDataSchema = v.object({

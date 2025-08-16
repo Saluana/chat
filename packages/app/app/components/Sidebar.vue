@@ -63,7 +63,7 @@
         class="p-2.5 flex justify-between items-center hover:bg-white hover:dark:bg-primary-200/10 rounded-lg"
         ref="pop"
       >
-        <div class="space-x-2">
+        <div class="space-x-2 flex items-center">
           <UAvatar
             :src="image"
             size="xs"
@@ -74,6 +74,46 @@
             class="select-none text-sm font-medium text-neutral-800 dark:text-neutral-300"
             >{{ name }}</span
           >
+          <!-- OpenRouter logo + connection dot -->
+          <div class="flex items-center gap-2 ml-2">
+            <!-- small OpenRouter logo -->
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 512 512"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="currentColor"
+              stroke="currentColor"
+              class="text-neutral-500 dark:text-neutral-300"
+            >
+              <g clip-path="url(#clip0_205_3)">
+                <path
+                  d="M3 248.945C18 248.945 76 236 106 219C136 202 136 202 198 158C276.497 102.293 332 120.945 423 120.945"
+                  stroke-width="90"
+                />
+                <path d="M511 121.5L357.25 210.268L357.25 32.7324L511 121.5Z" />
+                <path
+                  d="M0 249C15 249 73 261.945 103 278.945C133 295.945 133 295.945 195 339.945C273.497 395.652 329 377 420 377"
+                  stroke-width="90"
+                />
+                <path
+                  d="M508 376.445L354.25 287.678L354.25 465.213L508 376.445Z"
+                />
+              </g>
+            </svg>
+            <span
+              :title="
+                openrouterConnected
+                  ? 'OpenRouter connected'
+                  : 'OpenRouter disconnected'
+              "
+              :class="[
+                'w-3 h-3 rounded-full inline-block',
+                openrouterConnected ? 'bg-green-500' : 'bg-red-500',
+              ]"
+              aria-hidden="true"
+            />
+          </div>
         </div>
 
         <UIcon
@@ -103,6 +143,7 @@
 </template>
 
 <script setup lang="ts">
+const route = useRoute();
 const { searchRef } = useSearchRef();
 const { settingsRef } = useSettingsRef();
 const emit = defineEmits(["toggle", "new"]);
@@ -146,4 +187,51 @@ const {
   pinnedThreads: pinnedThreadsFromStore,
   unpinnedThreads: groupedThreadsFromStore,
 } = storeToRefs(threadsStore);
+
+const openrouterConnected = ref(false);
+
+async function checkOpenRouterKey() {
+  // Check fast client storage first
+  const localKey =
+    typeof window !== "undefined"
+      ? localStorage.getItem("openrouter_api_key")
+      : null;
+  if (localKey) {
+    openrouterConnected.value = true;
+    return;
+  }
+  // Then check synced KV
+  try {
+    const { $sync } = useNuxtApp();
+    const kvKey = await $sync.getKV("openrouter_api_key").catch(() => null);
+    openrouterConnected.value = !!kvKey;
+  } catch (e) {
+    openrouterConnected.value = false;
+  }
+}
+
+onMounted(() => {
+  checkOpenRouterKey();
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", (e) => {
+      if (e.key === "openrouter_api_key") checkOpenRouterKey();
+    });
+    // also react to our custom event fired on successful OAuth exchange
+    window.addEventListener("openrouter:connected", () => {
+      checkOpenRouterKey();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        checkOpenRouterKey();
+      }
+    });
+  }
+});
+
+watch(
+  () => route.fullPath,
+  () => {
+    checkOpenRouterKey();
+  },
+);
 </script>

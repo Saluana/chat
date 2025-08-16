@@ -898,6 +898,83 @@ export class Stream extends DurableObject {
 
 const app = new Hono<{ Bindings: Env }>();
 app.use(cors());
+// Exchange endpoint for OpenRouter OAuth PKCE flow.
+app.post("/auth/openrouter/exchange", async (c) => {
+  try {
+    const body = await c.req.json();
+    const { code, code_verifier, redirect_uri } = body || {};
+    if (!code || !code_verifier) {
+      return c.text("code and code_verifier are required", 400);
+    }
+
+    // Default to OpenRouter's public token exchange endpoint if not configured via env
+    const tokenUrl =
+      (c.env as any)["OPENROUTER_TOKEN_URL"] ||
+      "https://openrouter.ai/api/v1/auth/keys";
+    const redirectUri =
+      redirect_uri || (c.env as any)["OPENROUTER_REDIRECT_URI"] || "";
+
+    // Call OpenRouter's /api/v1/auth/keys to exchange code for a user-controlled key
+    const tokenResp = await fetch(tokenUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code,
+        code_verifier,
+        code_challenge_method: "S256",
+      }),
+    });
+
+    const tokenJson = await tokenResp.json();
+    // Debug log response
+    // eslint-disable-next-line no-console
+    console.debug(
+      "OpenRouter token response status:",
+      tokenResp.status,
+      "body:",
+      tokenJson,
+    );
+
+    const apiKey = (tokenJson &&
+      ((tokenJson as any).key || (tokenJson as any).access_token)) as
+      | string
+      | undefined;
+    if (!apiKey) {
+      return c.json({ error: "failed_to_fetch_key", details: tokenJson }, 502);
+    }
+
+    // Persist token using the User durable object via /push set_kv event
+    const stub = c.env.USER.get(c.env.USER.idFromName("global"));
+    const pushBody = {
+      id: crypto.randomUUID(),
+      events: [
+        {
+          type: "set_kv",
+          data: {
+            name: "openrouter_api_key",
+            value: apiKey,
+          },
+        },
+      ],
+    };
+    const req = new Request("https://nuxflare/push", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(pushBody),
+    });
+    await stub.fetch(req);
+
+    // Return the key so the client can persist immediately as well
+    return c.json({ success: true, key: apiKey });
+  } catch (err: any) {
+    console.error("OpenRouter exchange error:", err);
+    return c.json(
+      { error: "server_error", message: err?.message || String(err) },
+      500,
+    );
+  }
+});
+
 app.get("/stream/:id", async (c) => {
   const binding = c.env.STREAM;
   const stub = binding.get(binding.idFromName(c.req.param("id")));

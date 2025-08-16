@@ -52,6 +52,14 @@ export const useModelStore = defineStore("model", () => {
 
   const saveApiKey = async (platform: string) => {
     const apiKey = modelsByCategory.value[platform].apiKey;
+    // persist locally for immediate UX and client-run usage
+    if (platform === "openrouter" && typeof window !== "undefined") {
+      if (apiKey) localStorage.setItem("openrouter_api_key", apiKey);
+      else localStorage.removeItem("openrouter_api_key");
+      try {
+        window.dispatchEvent(new CustomEvent("openrouter:connected"));
+      } catch {}
+    }
     await setApiKeyInKV(platform, apiKey);
   };
 
@@ -100,5 +108,6 @@ export const useModelStore = defineStore("model", () => {
     modelsByCategory,
     setApiKey,
     saveApiKey,
+    setApiKeyInKV,
   };
 });

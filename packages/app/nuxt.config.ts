@@ -41,6 +41,8 @@ export default defineNuxtConfig({
       authClientID: "nuxflare-chat",
       sessionInterval: 5 * 60 * 1000,
       openRouterRedirectUri: process.env.OPENROUTER_REDIRECT_URI || "",
+      openRouterAuthUrl: process.env.OPENROUTER_AUTH_URL || "",
+      openRouterClientId: process.env.OPENROUTER_CLIENT_ID || "",
     },
     openRouterClientId: process.env.OPENROUTER_CLIENT_ID || "",
     openRouterClientSecret: process.env.OPENROUTER_CLIENT_SECRET || "",
