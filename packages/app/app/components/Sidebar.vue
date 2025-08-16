@@ -216,7 +216,8 @@ const actions = computed(() => {
 // Preview-backed sidebar lists
 const { items } = useThreadsPreview();
 
-const getThreadTime = (t: any) => Math.max(t.last_message_at || 0, t.updated_at || 0);
+const getThreadTime = (t: any) =>
+  Math.max(t.last_message_at || 0, t.updated_at || 0);
 
 const pinnedThreadsFromPreview = computed(() => {
   const result: Record<string, any[]> = { pinned: [] };

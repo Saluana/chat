@@ -62,8 +62,8 @@ async function doRefresh(force = false) {
     const t0 = import.meta.dev ? performance.now() : 0;
     isStale.value = true;
     try {
-  // Ensure DB warms up off critical path (nuxt-workers global)
-  await initDatabase();
+      // Ensure DB warms up off critical path (nuxt-workers global)
+      await initDatabase();
       // Query directly via dbExec to avoid export mismatch issues
       const sql = `
         SELECT
@@ -170,5 +170,22 @@ export function useThreadsPreview() {
     ready,
     refresh: (opts?: { force?: boolean }) => doRefresh(!!opts?.force),
     invalidateAll,
+    // Best-effort patch: updates an item locally without forcing a full refresh
+    upsertPreview: (partial: Partial<ThreadPreview> & { id: string }) => {
+      const idx = items.value.findIndex((t) => t.id === partial.id);
+      if (idx >= 0) {
+        const merged = { ...items.value[idx], ...partial } as ThreadPreview;
+        const next = items.value.slice();
+        next[idx] = merged;
+        // resort if time fields or pinned changed
+        next.sort(
+          (a, b) =>
+            (b.pinned as number) - (a.pinned as number) ||
+            (b.last_message_at || 0) - (a.last_message_at || 0) ||
+            (b.updated_at || 0) - (a.updated_at || 0),
+        );
+        items.value = next;
+      }
+    },
   };
 }

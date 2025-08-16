@@ -1,4 +1,5 @@
 import type { Thread } from "../composables/useThreadsStore";
+import { useThreadsPreview } from "../composables/useThreadsPreview";
 import { uuidv4 } from "~/utils/uuid";
 import type { PushEvent } from "@nuxflare-chat/api/types";
 import showToast from "./showToast";
@@ -20,6 +21,22 @@ function waitForSync(): Promise<void> {
   return new Promise((resolve) => {
     syncReadyResolvers.push(resolve);
   });
+}
+
+// Debounced preview invalidation to coalesce many small updates
+let _invalidateTimer: any = null;
+function schedulePreviewInvalidation(delay = 50) {
+  if (_invalidateTimer) return;
+  _invalidateTimer = setTimeout(() => {
+    _invalidateTimer = null;
+    try {
+      const { invalidateAll } = useThreadsPreview();
+      // fire and forget; SWR composable will refresh in background
+      void invalidateAll();
+    } catch (e) {
+      console.warn("preview invalidation failed", e);
+    }
+  }, delay);
 }
 
 const sanitizeFtsTerm = (term: string): string => {
@@ -144,6 +161,7 @@ export function syncServiceProvider() {
             payload: updatedThread,
           });
         }
+        schedulePreviewInvalidation();
       }
     } else if (msg.type === "message" && msg.data) {
       const backendMessage = msg.data;
@@ -205,6 +223,7 @@ export function syncServiceProvider() {
           });
           messageChannel.close();
         }
+        schedulePreviewInvalidation();
       }
     } else if (msg.type === "kv" && msg.data) {
       const backendKV = msg.data;
