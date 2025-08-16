@@ -121,12 +121,15 @@ packages/
         [[id]].vue
         openrouter-callback.vue
       plugins/
+        00-polyfills.client.ts
         sync.client.ts
       utils/
         markdown.ts
+        models-service.ts
         showToast.ts
         sqlite.ts
         sync-service.ts
+        uuid.ts
       workers/
         database.ts
       app.config.ts
@@ -165,6 +168,15 @@ packages/
     README.md
     typedoc.json
     web-test-runner.config.mjs
+planning/
+  openrouter-chat/
+    design.md
+    requirements.md
+    tasks.md
+  openrouter-models/
+    design.md
+    requirements.md
+    tasks.md
 .env.example
 .gitignore
 .prettierrc.json
@@ -176,146 +188,6 @@ README.md
 ```
 
 # Files
-
-## File: packages/app/app/composables/useOpenRouterAuth.ts
-````typescript
-import { ref } from "vue";
-
-function base64urlencode(str: ArrayBuffer) {
-  return btoa(String.fromCharCode(...new Uint8Array(str)))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
-async function sha256(plain: string) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(plain);
-  return await crypto.subtle.digest("SHA-256", data);
-}
-
-export function useOpenRouterAuth() {
-  const isLoggingIn = ref(false);
-
-  const startLogin = async () => {
-    isLoggingIn.value = true;
-    const codeVerifier = Array.from(crypto.getRandomValues(new Uint8Array(64)))
-      .map((b) => ("0" + b.toString(16)).slice(-2))
-      .join("");
-    const challengeBuffer = await sha256(codeVerifier);
-    const codeChallenge = base64urlencode(challengeBuffer);
-
-    // store verifier in session storage
-    sessionStorage.setItem("openrouter_code_verifier", codeVerifier);
-    // store a random state to protect against CSRF
-    const state = Array.from(crypto.getRandomValues(new Uint8Array(16)))
-      .map((b) => ("0" + b.toString(16)).slice(-2))
-      .join("");
-    sessionStorage.setItem("openrouter_state", state);
-
-    const rc = useRuntimeConfig();
-    // client_id is optional per docs; when not provided we omit it
-    const clientId = String(rc.public.openRouterClientId || "");
-    // default callback to current origin + known path when not provided
-    const callbackUrl =
-      String(rc.public.openRouterRedirectUri || "") ||
-      `${window.location.origin}/openrouter-callback`;
-
-    const params = new URLSearchParams();
-    params.append("response_type", "code");
-    if (clientId) params.append("client_id", clientId);
-    // OpenRouter expects a 'callback_url' parameter
-    params.append("callback_url", callbackUrl);
-    params.append("state", state);
-    params.append("code_challenge", codeChallenge);
-    params.append("code_challenge_method", "S256");
-    params.append("scope", "all");
-
-    const authUrl = String(
-      rc.public.openRouterAuthUrl || "https://openrouter.ai/auth",
-    );
-    const url = `${authUrl}?${params.toString()}`;
-
-    // Debug: log the final URL so devs can confirm params/authUrl are correct
-    // This helps when runtime config is missing or incorrect.
-    // eslint-disable-next-line no-console
-    console.debug("OpenRouter PKCE redirect URL:", url);
-
-    window.location.href = url;
-  };
-
-  return { startLogin, isLoggingIn };
-}
-````
-
-## File: packages/app/app/pages/openrouter-callback.vue
-````vue
-<template>
-  <div class="p-6">
-    <p>Completing login...</p>
-  </div>
-</template>
-
-<script setup>
-const route = useRoute();
-const router = useRouter();
-const rc = useRuntimeConfig();
-
-onMounted(async () => {
-  const code = route.query.code;
-  const state = route.query.state;
-  const verifier = sessionStorage.getItem("openrouter_code_verifier");
-  const savedState = sessionStorage.getItem("openrouter_state");
-  if (!code || !verifier) {
-    console.error("Missing code or verifier");
-    return router.push("/");
-  }
-  if (savedState && state !== savedState) {
-    console.error("State mismatch, potential CSRF");
-    return router.push("/");
-  }
-
-  try {
-    // Call OpenRouter directly per docs: https://openrouter.ai/api/v1/auth/keys
-    const directResp = await fetch("https://openrouter.ai/api/v1/auth/keys", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        code: String(code),
-        code_verifier: verifier,
-        code_challenge_method: "S256",
-      }),
-    });
-    const directJson = await directResp.json().catch(() => null);
-    if (!directResp.ok || !directJson) {
-      console.error("Direct exchange failed", directResp.status, directJson);
-      return;
-    }
-    const userKey = directJson.key || directJson.access_token;
-    if (!userKey) {
-      console.error("Direct exchange returned no key", directJson);
-      return;
-    }
-    // store in localStorage for use by front-end
-    localStorage.setItem("openrouter_api_key", userKey);
-    try {
-      window.dispatchEvent(new CustomEvent("openrouter:connected"));
-      // Best-effort: also persist to synced KV
-      try {
-        const { $sync } = useNuxtApp();
-        await $sync.setKV("openrouter_api_key", userKey);
-      } catch {}
-    } catch {}
-    sessionStorage.removeItem("openrouter_code_verifier");
-    sessionStorage.removeItem("openrouter_state");
-    router.push("/");
-  } catch (err) {
-    console.error("Exchange failed", err);
-    return;
-  }
-});
-</script>
-````
 
 ## File: .github/FUNDING.yml
 ````yaml
@@ -1124,6 +996,216 @@ export const useSettingsRef = () => {
 };
 ````
 
+## File: packages/app/app/plugins/00-polyfills.client.ts
+````typescript
+export default defineNuxtPlugin(() => {
+  // no-op: using internal uuid utility instead of mutating globals
+});
+````
+
+## File: packages/app/app/utils/models-service.ts
+````typescript
+// ModelsService: Fetch OpenRouter models, cache, and provide simple filters
+// Source: https://openrouter.ai/api/v1/models
+// Usage: import { modelsService } from "~/utils/models-service";
+
+export interface OpenRouterModel {
+  id: string; // e.g. "deepseek/deepseek-r1-0528:free"
+  name: string;
+  description?: string;
+  created?: number;
+  architecture?: {
+    input_modalities?: string[];
+    output_modalities?: string[];
+    tokenizer?: string;
+    instruct_type?: string;
+  };
+  top_provider?: {
+    is_moderated?: boolean;
+    context_length?: number;
+    max_completion_tokens?: number;
+  };
+  pricing?: {
+    prompt?: string; // USD per input token (stringified number)
+    completion?: string; // USD per output token
+    image?: string;
+    request?: string;
+    web_search?: string;
+    internal_reasoning?: string;
+    input_cache_read?: string;
+    input_cache_write?: string;
+  };
+  canonical_slug?: string;
+  context_length?: number;
+  hugging_face_id?: string;
+  per_request_limits?: Record<string, unknown>;
+  supported_parameters?: string[]; // e.g. ["temperature","top_p","reasoning"]
+}
+
+interface ModelsResponse {
+  data: OpenRouterModel[];
+}
+
+export interface ModelCatalogCache {
+  data: OpenRouterModel[];
+  fetchedAt: number;
+}
+
+const CACHE_KEY = "openrouter_model_catalog_v1";
+
+function readApiKey(): string | null {
+  try {
+    if (typeof window === "undefined") return null;
+    return localStorage.getItem("openrouter_api_key");
+  } catch {
+    return null;
+  }
+}
+
+function saveCache(data: OpenRouterModel[]): void {
+  try {
+    if (typeof window === "undefined") return;
+    const payload: ModelCatalogCache = { data, fetchedAt: Date.now() };
+    localStorage.setItem(CACHE_KEY, JSON.stringify(payload));
+  } catch {}
+}
+
+function loadCache(): ModelCatalogCache | null {
+  try {
+    if (typeof window === "undefined") return null;
+    const raw = localStorage.getItem(CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ModelCatalogCache;
+    if (!Array.isArray(parsed?.data)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function toNumber(x?: string | number | null): number | null {
+  if (x === undefined || x === null) return null;
+  const n = typeof x === "string" ? Number(x) : x;
+  return Number.isFinite(n) ? n : null;
+}
+
+export async function fetchModels(opts?: {
+  force?: boolean;
+  ttlMs?: number;
+}): Promise<OpenRouterModel[]> {
+  const ttlMs = opts?.ttlMs ?? 1000 * 60 * 60; // 1 hour
+  if (!opts?.force) {
+    const cached = loadCache();
+    if (
+      cached &&
+      Date.now() - cached.fetchedAt <= ttlMs &&
+      cached.data.length
+    ) {
+      return cached.data;
+    }
+  }
+
+  const url = "https://openrouter.ai/api/v1/models";
+  const key = readApiKey();
+  const headers: Record<string, string> = {};
+  if (key) headers["Authorization"] = `Bearer ${key}`;
+
+  const res = await fetch(url, { headers });
+  if (!res.ok) {
+    // Fallback to any cache on failure
+    const cached = loadCache();
+    if (cached?.data?.length) return cached.data;
+    throw new Error(`Failed to fetch models: ${res.status} ${res.statusText}`);
+  }
+  const json = (await res.json()) as ModelsResponse;
+  const list = Array.isArray(json?.data) ? json.data : [];
+  saveCache(list);
+  return list;
+}
+
+// Filters
+export function filterByText(
+  models: OpenRouterModel[],
+  q: string,
+): OpenRouterModel[] {
+  const query = q?.trim().toLowerCase();
+  if (!query) return models;
+  return models.filter((m) => {
+    const hay =
+      `${m.id}\n${m.name || ""}\n${m.description || ""}`.toLowerCase();
+    return hay.includes(query);
+  });
+}
+
+export function filterByModalities(
+  models: OpenRouterModel[],
+  opts: { input?: string[]; output?: string[] } = {},
+): OpenRouterModel[] {
+  const { input, output } = opts;
+  if (!input && !output) return models;
+  return models.filter((m) => {
+    const inOk =
+      !input ||
+      input.every((i) => m.architecture?.input_modalities?.includes(i));
+    const outOk =
+      !output ||
+      output.every((o) => m.architecture?.output_modalities?.includes(o));
+    return inOk && outOk;
+  });
+}
+
+export function filterByContextLength(
+  models: OpenRouterModel[],
+  minCtx: number,
+): OpenRouterModel[] {
+  if (!minCtx) return models;
+  return models.filter((m) => {
+    const ctx = m.top_provider?.context_length ?? m.context_length ?? 0;
+    return (ctx || 0) >= minCtx;
+  });
+}
+
+export function filterByParameters(
+  models: OpenRouterModel[],
+  params: string[],
+): OpenRouterModel[] {
+  if (!params?.length) return models;
+  return models.filter((m) => {
+    const supported = m.supported_parameters || [];
+    return params.every((p) => supported.includes(p));
+  });
+}
+
+export type PriceBucket = "free" | "low" | "medium" | "any";
+
+export function filterByPriceBucket(
+  models: OpenRouterModel[],
+  bucket: PriceBucket,
+): OpenRouterModel[] {
+  if (!bucket || bucket === "any") return models;
+  return models.filter((m) => {
+    const p = toNumber(m.pricing?.prompt) ?? 0;
+    const c = toNumber(m.pricing?.completion) ?? 0;
+    const max = Math.max(p, c);
+    if (bucket === "free") return max === 0;
+    if (bucket === "low") return max > 0 && max <= 0.000002; // heuristic
+    if (bucket === "medium") return max > 0.000002 && max <= 0.00001;
+    return true;
+  });
+}
+
+export const modelsService = {
+  fetchModels,
+  filterByText,
+  filterByModalities,
+  filterByContextLength,
+  filterByParameters,
+  filterByPriceBucket,
+};
+
+export default modelsService;
+````
+
 ## File: packages/app/app/utils/showToast.ts
 ````typescript
 export default function showToast(message: string = "", error: string = "") {
@@ -1137,6 +1219,30 @@ export default function showToast(message: string = "", error: string = "") {
     },
     color: error ? "error" : "primary",
   });
+}
+````
+
+## File: packages/app/app/utils/uuid.ts
+````typescript
+// Safe UUID v4 generator for environments where crypto.randomUUID may be unavailable
+export function uuidv4(): string {
+  const g: any = globalThis as any;
+  const cryptoObj = g?.crypto;
+  if (cryptoObj?.randomUUID) {
+    return cryptoObj.randomUUID();
+  }
+  const getRandomValues: ((arr: Uint8Array) => Uint8Array) | undefined =
+    cryptoObj?.getRandomValues;
+  const bytes = new Uint8Array(16);
+  if (getRandomValues) getRandomValues.call(cryptoObj, bytes);
+  else for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  // Set version/variant bits
+  bytes[6] = ((bytes[6] as number) & 0x0f) | 0x40;
+  bytes[8] = ((bytes[8] as number) & 0x3f) | 0x80;
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join(
+    "",
+  );
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 ````
 
@@ -2584,6 +2690,419 @@ export default /** @type {import("@web/test-runner").TestRunnerConfig} */ ({
 });
 ````
 
+## File: planning/openrouter-chat/design.md
+````markdown
+---
+artifact_id: 9a1f9d1c-9d37-4f50-8e39-4b52b5b9f3da
+---
+
+# design.md
+
+## Overview
+
+Nuxflare Chat is a Nuxt 3 app with a Cloudflare Durable Object (DO) backend using Hono and Drizzle (durable-sqlite). The frontend stores a local mirror (OPFS via wa-sqlite). Sync occurs over a WebSocket to the DO. We will:
+
+- Make OpenRouter the primary auth via PKCE (S256) with direct key exchange.
+- Require the OpenRouter key for all model runs.
+- Introduce a Secure Private Sync Key (SPSK) per device to authenticate the sync channel.
+- Harden the new-thread flow and streaming UX.
+
+## Architecture
+
+```mermaid
+flowchart TD
+  A[User clicks Login with OpenRouter] --> B[openrouter.ai/auth?callback_url&code_challenge=S256]
+  B --> C[Callback /openrouter-callback]
+  C --> D[POST https://openrouter.ai/api/v1/auth/keys\n{ code, code_verifier, S256 }]
+  D --> E[Key stored in localStorage + KV]
+  E --> F[Mint SPSK]
+  F --> G[setAuthInfo(apiUrl, SPSK)]
+  G --> H[WebSocket connect to DO]
+  H --> I[push/pull events]
+  I --> J{run_thread}
+  J --> K[Stream DO]
+  K --> L[OpenRouter provider]
+  L --> K
+  K --> M[Sync back message updates]
+  M --> N[OPFS local DB + UI]
+```
+
+## Core Components
+
+- Frontend (Nuxt 3)
+  - useOpenRouterAuth: PKCE S256; direct key exchange; state/verifier handling.
+  - Sidebar/Settings: connection indicator, manage key, logout.
+  - Chat page [[id]].vue: new_thread → new_message → run_thread; wait for local thread presence; streaming list; attachments upload.
+  - sync-service: WebSocket client, setAuthInfo(SPSK), push/pull, local DB apply.
+- Backend (Cloudflare DO + Hono)
+  - DO: endpoints `/pull`, `/push`, `/stream/:id`; WebSocket upgrade handler; run_thread → Stream DO → OpenRouter.
+  - SPSK verification on WS connect and /push.
+
+## SPSK (Secure Private Sync Key)
+
+- Purpose: Authenticate each client device for sync (push/pull and run_thread).
+- Model: DO mints a token per device; token is opaque to client; DO stores a hash + metadata.
+- Transport: Provided as the second WebSocket subprotocol (replacing the current "public") and sent in the `Authentication` header for HTTP pulls.
+- Rotation: Time-based (e.g., 7 days) and manual revoke.
+
+### Interfaces (TypeScript)
+
+```ts
+// Token minting
+interface MintSpskRequest {
+  deviceName?: string;
+}
+interface MintSpskResponse {
+  token: string; // opaque to client
+  expiresAt: number; // unix seconds
+}
+
+// On client
+type SyncAuthToken = string; // SPSK
+
+// Push/Run events already exist; extend model options
+interface ModelRunOptions {
+  name?: string;
+  thinkingBudget?: "low" | "medium" | "high";
+  webSearch?: boolean;
+  openrouterApiKey: string; // required
+}
+```
+
+### DO Changes
+
+- Add `/auth/spsk/mint` (POST) to create a token; return `{ token, expiresAt }`.
+- Store token hash and metadata in a new table.
+- Verify token on:
+  - WebSocket connect: check subprotocol includes valid token.
+  - `/pull` and `/push`: check `Authentication: Bearer <token>`.
+
+### Data Models (Drizzle durable-sqlite)
+
+```ts
+// New table for SPSK
+export const client_tokens = sqliteTable("client_tokens", {
+  id: text("id").primaryKey(),
+  token_hash: text("token_hash").notNull(),
+  device_name: text("device_name"),
+  created_at: int("created_at")
+    .notNull()
+    .default(sql`(unixepoch())`),
+  expires_at: int("expires_at").notNull(),
+  revoked: int("revoked", { mode: "boolean" }).notNull().default(false),
+  clock: int("clock").notNull(),
+});
+```
+
+- Existing tables `threads`, `messages`, `kv` remain; we continue storing `openrouter_api_key` in `kv` for server-side runs as a fallback, but the client will always send `openrouterApiKey`.
+
+## Error Handling
+
+- Client:
+  - Central toast helper for: missing key, SPSK invalid, network failures, timeouts, rate limits.
+  - Stream UI shows partial text and an error badge on failure.
+- Server/DO:
+  - Validate SPSK; return 401 on invalid/expired; log context.
+  - Validate presence of `openrouterApiKey` for run_thread; return 400.
+
+## Testing Strategy
+
+- Unit
+  - PKCE helpers (sha256/base64url), options merging, storage helpers.
+- Integration
+  - SPSK mint + WS connect with valid/invalid tokens; /push rejects without token.
+  - run_thread with and without key; attachment upload/consumption.
+- E2E (Playwright)
+  - Login with OpenRouter (mock exchange) → indicator green → send from home creates thread and streams.
+  - Retry message, branch thread.
+- Performance
+  - WS reconnect under network flaps; pull batching; OPFS writes throughput.
+
+## Security Considerations
+
+- OpenRouter key stays client-side; do not log it.
+- SPSK opaque and hashed at rest; expiration and manual revoke supported.
+- CSRF protection via `state` param in PKCE.
+- HTTPS and secure cookies in production.
+````
+
+## File: planning/openrouter-chat/requirements.md
+````markdown
+---
+artifact_id: 1f8c33b7-24dc-4f26-a4a5-3a3f1a9f154d
+---
+
+# requirements.md
+
+## Introduction
+
+This plan hardens and optimizes the Nuxflare Chat UI, removes legacy provider paths, and makes OpenRouter the primary authentication and model gateway. It also introduces a secure private sync key (SPSK) for client-to-Durable Object sync, ensuring only authorized clients can push/pull and run threads. Goals:
+
+- Bug-free, fast, and resilient chat UX.
+- PKCE OAuth with OpenRouter (plus manual key paste fallback).
+- Strong sync/auth boundary via SPSK.
+- Observability and tests.
+
+## User Roles
+
+- User: end-user using chat, connects to OpenRouter, sends messages, manages key.
+- System: Durable Object (backend) enforcing key presence and SPSK.
+
+## Functional Requirements
+
+1. OpenRouter Authentication (PKCE + fallback)
+
+- User Story: As a user, I want to connect my OpenRouter account with one click using OAuth PKCE so I can use my own key safely.
+- Acceptance Criteria:
+  - WHEN the user clicks “Login with OpenRouter” THEN the app SHALL redirect to openrouter.ai/auth with callback_url and S256 challenge.
+  - WHEN redirected back with code/state THEN the app SHALL exchange code at https://openrouter.ai/api/v1/auth/keys, and SHALL store the returned key locally; it MAY also sync it to KV for multi-tab use.
+  - IF code_verifier or state is invalid THEN the app SHALL show a clear error and not store any key.
+  - IF the user pastes a key manually THEN the app SHALL validate minimal format and store locally.
+
+2. Key Presence Required for Sends
+
+- User Story: As a user, I want requests to fail fast if my OpenRouter key is missing so I know to connect first.
+- Acceptance Criteria:
+  - WHEN sending a message (new thread or existing) THEN the client SHALL include options.openrouterApiKey.
+  - IF key is absent THEN the UI SHALL prompt to connect and block the send.
+
+3. Secure Private Sync Key (SPSK)
+
+- User Story: As a user, I want my client to use a private sync key so only my authorized device can sync and run threads.
+- Acceptance Criteria:
+  - WHEN the chat app first loads with an OpenRouter key THEN the client SHALL mint or retrieve an SPSK and set it as the sync token via setAuthInfo.
+  - WHEN connecting via WebSocket THEN the server SHALL validate the SPSK before accepting /push or /pull.
+  - SPSK SHALL be device-scoped, rotatable, and have an expiration.
+  - IF SPSK is invalid/expired THEN the app SHALL attempt automatic rotation; otherwise prompt user to re-connect.
+
+4. New Thread UX from Home
+
+- User Story: As a user on the home page, I want sending a message to create a new thread, navigate to it, and start streaming.
+- Acceptance Criteria:
+  - WHEN the user sends from home THEN the app SHALL emit new_thread → new_message → run_thread in that order.
+  - The UI SHALL navigate to /:threadId only after the thread exists locally.
+
+5. Streaming and Attachments
+
+- User Story: As a user, I want assistant responses to stream, and I can attach files/images that the model can use.
+- Acceptance Criteria:
+  - WHEN run_thread starts THEN the assistant placeholder message SHALL appear and stream until done or error.
+  - WHEN attachments are added THEN the server SHALL include attachment blobs in formatted content for OpenRouter (image/file handling).
+
+6. Connection Indicator & Settings
+
+- User Story: As a user, I want to see whether I’m connected to OpenRouter and manage my key.
+- Acceptance Criteria:
+  - WHEN key exists locally or in KV THEN the indicator SHALL turn green; otherwise red.
+  - The Settings page SHALL show login, paste key, and logout actions.
+
+7. Error Handling & UX Feedback
+
+- User Story: As a user, I want clear errors for key missing, rate limits, timeouts, and model errors.
+- Acceptance Criteria:
+  - IF the model or network fails THEN the assistant message SHALL capture error details; a toast SHALL show a concise message.
+  - IF the SPSK fails validation THEN a toast SHALL prompt to reconnect.
+
+8. Search and History
+
+- User Story: As a user, I want to search my threads and see recent history clearly grouped.
+- Acceptance Criteria:
+  - WHEN I search THEN results SHALL return threads by recency and relevance.
+  - History SHALL be grouped (today, yesterday, last 7/30 days, older) and respect pinned/deleted flags.
+
+## Non-Functional Requirements
+
+- Performance: initial load < 2s on typical network; streaming latency minimal (< 300ms overhead).
+- Reliability: websockets reconnect automatically; offline cache via OPFS persists threads/messages.
+- Security: SPSK not exfiltrated; OpenRouter key stays client-side; HTTPS enforced in production.
+- Accessibility: keyboard navigation and ARIA attributes for major controls.
+- Observability: basic logs for auth, sync connects, errors.
+
+## Integration Requirements
+
+- OpenRouter: PKCE OAuth per docs; direct exchange at /api/v1/auth/keys; Bearer usage for completions.
+- Cloudflare DO + Hono: endpoints /pull, /push, /stream/:id; SPSK verification on WS connects and push/pull.
+````
+
+## File: planning/openrouter-models/design.md
+````markdown
+---
+artifact_id: 0e4b5a69-6b0a-4f74-9a38-2c2b386a5f61
+---
+
+# design.md
+
+## Overview
+
+Implement a Settings-based Model Catalog UI backed by OpenRouter /models, allowing users to search, filter, and select favorites for use in the chat model dropdown. Selections persist locally and via KV; the chat run path uses the selected model id.
+
+## Architecture
+
+```mermaid
+flowchart TD
+  A[Settings: Model Catalog] -->|fetch| B[OpenRouter /api/v1/models]
+  B --> C[Cache in localStorage]
+  C --> D[Pinia ModelStore]
+  D --> E[Selected Models -> KV sync]
+  E --> F[ChatPrompt Model Dropdown]
+  F --> G[run_thread options.name=modelId]
+```
+
+## Components and Interfaces
+
+### ModelsService (client)
+
+- Responsibilities:
+  - Fetch /api/v1/models (Authorization if available) and map into internal shape.
+  - Cache models in localStorage with ETag/lastFetched.
+  - Provide filter/search helpers.
+
+```ts
+export interface OpenRouterModel {
+  id: string; // e.g. "deepseek/deepseek-r1-0528:free"
+  name: string; // friendly name
+  description?: string;
+  context_length?: number;
+  architecture?: {
+    input_modalities?: string[]; // 'text', 'image'
+    output_modalities?: string[];
+  };
+  pricing?: {
+    prompt?: string;
+    completion?: string;
+    image?: string;
+  };
+  supported_parameters?: string[];
+}
+
+export interface ModelsResponse {
+  data: OpenRouterModel[];
+}
+```
+
+### Pinia: useModelStore (extend)
+
+- Add:
+  - state.selectedModelIds: string[]
+  - state.catalog: OpenRouterModel[]
+  - getters.selectedModels
+  - actions: fetchModels(), filterModels(query, filters), toggleSelected(id), saveSelection(), loadSelection()
+- Persist:
+  - localStorage: `openrouter_selected_models`
+  - KV: `openrouter_selected_models`
+
+### UI
+
+- Settings page (new section): "Models"
+  - Search input, filters (chips/toggles): Images, Min context length, Reasoning, Web search support, Price <= X (basic bucketed chips), Category (if available).
+  - Grid/List of cards: name, id, context length, badges (image/text), price chips.
+  - Select checkbox/star on each card; footer bar with Save selection.
+  - Refresh button.
+- ChatPrompt dropdown
+  - Populate from selectedModels; show friendly names; store id as value.
+  - If none selected, fall back to a minimal curated default (current DeepSeek R1 free) or top N from catalog.
+  - Disable/enable toggles (ReasoningBudget/WebSearch) based on supported_parameters and modalities.
+
+## Data and Persistence
+
+- Cache models JSON in localStorage with `openrouter_model_catalog` and `openrouter_model_catalog_fetched_at`.
+- Selection persisted in localStorage + KV; localStorage used immediately for UX; KV for multi-tab/restore.
+
+## Error Handling
+
+- If fetch 401 or network error: show toast; use cached list; expose "Retry".
+- If empty or filter returns none: show empty state with clear reset filters action.
+
+## Testing Strategy
+
+- Unit: ModelsService mapping and filters; store selection persistence.
+- Integration: settings selection -> dropdown population; run_thread emits selected id; toggles disable when unsupported.
+- E2E: Login → open Models → search/select → save → send message with selected model → stream.
+
+## Security
+
+- Do not log API key.
+- Keep key in client; Authorization header only when key exists.
+
+```ts
+// Run options contract used in sync-service
+interface ModelRunOptions {
+  name: string; // must be the OpenRouter model id
+  thinkingBudget?: "low" | "medium" | "high";
+  webSearch?: boolean;
+}
+```
+````
+
+## File: planning/openrouter-models/requirements.md
+````markdown
+---
+artifact_id: c1f4d0c0-8f2e-4f1e-9c96-61f2a9fe7e8f
+---
+
+# requirements.md
+
+## Introduction
+
+Add an OpenRouter model catalog experience so users can search models, curate their personal picker list, and use those models in chat. Integrate seamlessly with existing OpenRouter-first auth and chat flow.
+
+## User Roles
+
+- User: browses and filters models, selects favorites for quick access, and uses them in chat.
+
+## Functional Requirements
+
+1. Model Catalog Browsing
+
+- User Story: As a user, I want to browse and search OpenRouter models so I can find what I need.
+- Acceptance Criteria:
+  - WHEN the user opens Models in Settings THEN the app SHALL fetch https://openrouter.ai/api/v1/models (with Authorization header if available) and cache the results.
+  - The catalog SHALL support search (by name/description/id) and filters (e.g., supports images, context length min, reasoning capability if flagged, pricing presence, category when available).
+  - The list SHALL show name, provider slug/id, context length, simple price chips, and badges for capabilities.
+
+2. Select Models for Dropdown
+
+- User Story: As a user, I want to pick favorite models to appear in the chat model dropdown.
+- Acceptance Criteria:
+  - WHEN the user checks/selects models in the catalog THEN the selection SHALL be persisted (localStorage for instant UX, and KV key `openrouter_selected_models` for sync).
+  - WHEN the user returns to chat THEN the model dropdown SHALL list only the selected models (fallback to a sensible default if none).
+  - The selection SHALL survive refresh and multi-tab usage.
+
+3. Use Selected Models in Chat
+
+- User Story: As a user, I want to run with my selected model.
+- Acceptance Criteria:
+  - WHEN the user picks a model in the dropdown THEN run_thread SHALL send options.name = <model id> to the server OpenRouter provider.
+  - IF the selected model supports reasoning or web search, the UI SHALL enable those toggles; otherwise they SHALL be disabled/grayed out.
+
+4. Refresh and Fallbacks
+
+- User Story: As a user, I want the models list to remain current and not block my session if offline.
+- Acceptance Criteria:
+  - The app SHALL cache the last successful model list to use offline.
+  - A manual “Refresh” button SHALL re-fetch models and update the cache.
+  - IF fetching fails THEN the app SHALL show a toast and fall back to cached or minimal built-in list.
+
+5. Error Handling & Performance
+
+- User Story: As a user, I want responsive UI and clear errors.
+- Acceptance Criteria:
+  - Loading states SHALL be displayed during fetch; empty/error states SHALL be rendered when appropriate.
+  - Fetching and filtering SHALL happen within ~150ms perceived delay on typical networks; pagination or virtualization SHALL be used for long lists.
+
+## Non-Functional Requirements
+
+- Security: Use HTTPS; pass Authorization: Bearer <OpenRouter key> when present (do not log).
+- Performance: Cache model list; debounce client-side search.
+- Accessibility: Keyboard navigation, ARIA labels on filters/buttons.
+- Consistency: Use Nuxt UI components to match the app style.
+
+## Integration Requirements
+
+- OpenRouter Models API: GET https://openrouter.ai/api/v1/models with optional query params.
+- Persistence: localStorage + KV key `openrouter_selected_models`.
+````
+
 ## File: .prettierrc.json
 ````json
 {}
@@ -3290,6 +3809,132 @@ watch(
 </script>
 ````
 
+## File: packages/app/app/composables/useOpenRouterAuth.ts
+````typescript
+import { ref } from "vue";
+
+function base64urlencode(str: ArrayBuffer) {
+  return btoa(String.fromCharCode(...new Uint8Array(str)))
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+async function sha256(plain: string) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(plain);
+  return await crypto.subtle.digest("SHA-256", data);
+}
+
+export function useOpenRouterAuth() {
+  const isLoggingIn = ref(false);
+
+  const startLogin = async () => {
+    if (isLoggingIn.value) return;
+    isLoggingIn.value = true;
+    const codeVerifier = Array.from(crypto.getRandomValues(new Uint8Array(64)))
+      .map((b) => ("0" + b.toString(16)).slice(-2))
+      .join("");
+    // Compute PKCE code_challenge. Prefer S256, but fall back to "plain"
+    // when SubtleCrypto is unavailable (e.g., iOS Safari on non-HTTPS).
+    let codeChallenge = codeVerifier;
+    let codeChallengeMethod: "S256" | "plain" = "plain";
+    try {
+      if (
+        typeof crypto !== "undefined" &&
+        typeof crypto.subtle?.digest === "function"
+      ) {
+        const challengeBuffer = await sha256(codeVerifier);
+        codeChallenge = base64urlencode(challengeBuffer);
+        codeChallengeMethod = "S256";
+      }
+    } catch {
+      // Keep plain fallback
+      codeChallenge = codeVerifier;
+      codeChallengeMethod = "plain";
+    }
+
+    // store verifier in session storage
+    sessionStorage.setItem("openrouter_code_verifier", codeVerifier);
+    // store the method so the callback knows how to exchange
+    try {
+      sessionStorage.setItem("openrouter_code_method", codeChallengeMethod);
+    } catch {}
+    // store a random state to protect against CSRF
+    const state = Array.from(crypto.getRandomValues(new Uint8Array(16)))
+      .map((b) => ("0" + b.toString(16)).slice(-2))
+      .join("");
+    sessionStorage.setItem("openrouter_state", state);
+
+    const rc = useRuntimeConfig();
+    // default callback to current origin + known path when not provided
+    const callbackUrl =
+      String(rc.public.openRouterRedirectUri || "") ||
+      `${window.location.origin}/openrouter-callback`;
+
+    const params = new URLSearchParams();
+    // Per docs, only callback_url, code_challenge(+method), and optional state are required
+    // OpenRouter expects a 'callback_url' parameter
+    params.append("callback_url", callbackUrl);
+    params.append("state", state);
+    params.append("code_challenge", codeChallenge);
+    params.append("code_challenge_method", codeChallengeMethod);
+    // If you have a registered app on OpenRouter, including client_id helps avoid
+    // app auto-creation based on referrer (which can be flaky on mobile).
+    const clientId = rc.public.openRouterClientId as string | undefined;
+    if (clientId) params.append("client_id", String(clientId));
+
+    const authUrl = String(
+      rc.public.openRouterAuthUrl || "https://openrouter.ai/auth",
+    );
+    const url = `${authUrl}?${params.toString()}`;
+
+    // Warn if callback URL is not HTTPS or localhost (common iOS issue)
+    try {
+      const u = new URL(callbackUrl);
+      const isLocalhost = ["localhost", "127.0.0.1"].includes(u.hostname);
+      const isHttps = u.protocol === "https:";
+      if (!isHttps && !isLocalhost) {
+        console.warn(
+          "OpenRouter PKCE: non-HTTPS, non-localhost callback_url detected. On mobile, use a public HTTPS tunnel and set OPENROUTER_REDIRECT_URI.",
+          callbackUrl,
+        );
+      }
+    } catch {}
+
+    // Debug: log the final URL so devs can confirm params/authUrl are correct
+    // This helps when runtime config is missing or incorrect.
+    // eslint-disable-next-line no-console
+    console.debug("OpenRouter PKCE redirect URL:", url);
+
+    // Use assign to ensure history behaves consistently across mobile browsers
+    window.location.assign(url);
+  };
+
+  const logoutOpenRouter = async () => {
+    try {
+      // Remove local copy immediately for UX
+      if (typeof window !== "undefined") {
+        localStorage.removeItem("openrouter_api_key");
+      }
+      // Best-effort: clear synced KV by setting empty
+      try {
+        const { $sync } = useNuxtApp();
+        await $sync.setKV("openrouter_api_key", "");
+      } catch {}
+      // Notify UI listeners (Sidebar, etc.) to recompute state
+      try {
+        window.dispatchEvent(new CustomEvent("openrouter:connected"));
+      } catch {}
+    } catch (e) {
+      console.error("OpenRouter logout failed", e);
+    }
+  };
+
+  return { startLogin, logoutOpenRouter, isLoggingIn };
+}
+````
+
 ## File: packages/app/app/utils/markdown.ts
 ````typescript
 import rehypeShiki from "@shikijs/rehype";
@@ -3402,6 +4047,176 @@ onMounted(() => {
   processMarkdownChunk("# test");
 });
 </script>
+````
+
+## File: planning/openrouter-chat/tasks.md
+````markdown
+---
+artifact_id: d2b0b0d7-9f1a-4df6-b0ca-8ac3af5a0d6f
+---
+
+# tasks.md
+
+## 1. Harden OpenRouter Auth (PKCE + fallback)
+
+- [x] Implement S256 PKCE redirect with callback_url (use Web Crypto).
+  - Requirements: 1
+- [x] Directly exchange code at https://openrouter.ai/api/v1/auth/keys and store key locally; best-effort KV sync.
+  - Requirements: 1, 2
+- [x] Add logout to clear localStorage + KV and flip indicator.
+  - Requirements: 6
+
+## 2. Enforce Key on Sends
+
+- [x] Ensure every run_thread includes options.openrouterApiKey; early-block sends if missing.
+  - Requirements: 2
+- [x] Add UI toast when key missing with quick “Login with OpenRouter” action.
+  - Requirements: 2, 6, 7
+
+## 3. Secure Private Sync Key (SPSK)
+
+- [ ] Backend: Add `client_tokens` table in DO durable-sqlite (id, token_hash, device_name, created_at, expires_at, revoked, clock).
+  - Requirements: 3
+- [ ] Endpoint POST /auth/spsk/mint to generate and return `{ token, expiresAt }`; store hash.
+  - Requirements: 3
+- [ ] WS connect: require SPSK as a subprotocol (replace current static token). Validate on connect.
+  - Requirements: 3
+- [ ] /pull and /push: require `Authentication: Bearer <SPSK>` and validate.
+  - Requirements: 3
+- [ ] Client: on load, mint/reuse SPSK and call $sync.setAuthInfo(apiUrl, spsk).
+  - Requirements: 3
+- [ ] Rotation: auto-renew if `expiresAt` near; add manual revoke in settings.
+  - Requirements: 3, 6
+
+## 4. New Thread Flow and UX Polish
+
+- [x] Event order fix in newThread: new_thread → new_message → run_thread.
+  - Requirements: 4
+- [x] Await local thread presence before navigating.
+  - Requirements: 4
+- [x] Fix not-found guard in `[[id]].vue` to only show when thread exists and is deleted.
+  - Requirements: 4, 7
+
+## 5. Streaming and Attachments
+
+- [x] Ensure Stream DO writes partial content and final message; error path writes partials + error.
+  - Requirements: 5, 7
+- [x] Validate attachments upload (PUT /blob) and server-side inclusion in formatted messages (image/file types).
+  - Requirements: 5
+
+## 6. Settings & Indicator
+
+- [ ] Sidebar indicator: prefer localStorage; listen to `openrouter:connected`, storage, visibilitychange, and route changes.
+  - Requirements: 6
+- [ ] Settings: add paste key, copy key masked, and logout.
+  - Requirements: 6
+
+## 7. Error Handling and UX Feedback
+
+- [ ] Standardize ServiceResult-like errors from DO; map to user-friendly toasts.
+  - Requirements: 7
+- [ ] Add empty/error states for streaming message components.
+  - Requirements: 7
+
+## 8. Tests
+
+- [ ] Unit: PKCE helpers; options merge; storage utils.
+  - Requirements: 1, 2
+- [ ] Integration: SPSK mint, WS auth; /push guard; run_thread missing key.
+  - Requirements: 2, 3
+- [ ] E2E: Login (mock exchange) → send from home → stream; retry; branch; logout.
+  - Requirements: 1, 4, 5, 6, 7
+
+## 9. Observability & Perf
+
+- [ ] Add concise logs for WS connect/disconnect, SPSK validate, run_thread start/end.
+  - Requirements: NFR
+- [ ] Batch/pause applyChange under heavy load; measure OPFS write throughput.
+  - Requirements: NFR
+
+## 10. Deployment & Docs
+
+- [ ] Document required envs (only for optional server exchange), prod HTTPS, and CSP.
+  - Requirements: Integration, Security
+- [ ] README section for OpenRouter setup and SPSK design.
+  - Requirements: 1, 3
+
+---
+
+Notes:
+
+- Keep the OpenRouter key strictly client-side; never log it.
+- SPSK is opaque; store only a hash and metadata on the server (revocable and expiring).
+- Map each UI action to clear toasts and inline states to avoid silent failures.
+````
+
+## File: planning/openrouter-models/tasks.md
+````markdown
+---
+artifact_id: 8a7d5b36-6a0e-4e4e-8a2c-6f07a64c5a41
+---
+
+# tasks.md
+
+## 1. Models API client
+
+- [x] Create ModelsService to GET https://openrouter.ai/api/v1/models (attach Authorization if key exists).
+  - Requirements: 1
+- [x] Map API response to OpenRouterModel; cache in localStorage with fetchedAt.
+  - Requirements: 4
+- [x] Add simple filter helpers (by text, modalities, context length, parameters, price buckets).
+  - Requirements: 1
+
+## 2. Extend Pinia Model Store
+
+- [x] Add catalog state, selectedModelIds, getters, and actions: fetchModels(), filterModels(), toggleSelected(), saveSelection(), loadSelection().
+  - Requirements: 1, 2
+- [x] Persist selectedModelIds to localStorage + KV (`openrouter_selected_models`).
+  - Requirements: 2
+
+## 3. Settings UI: Model Catalog
+
+- [x] Add a new Settings panel: search bar, filter chips, Refresh button.
+  - Requirements: 1, 4
+- [x] Render model cards with select checkbox/star, key badges (image/text), context length and price. Virtualize list if > 200 items.
+  - Requirements: 1
+- [x] Save selection to store (localStorage + KV) and toast success.
+  - Requirements: 2, 5
+
+## 4. Chat Dropdown Integration
+
+- [ ] Populate ChatPrompt model dropdown from selectedModels; fallback to curated default if empty.
+  - Requirements: 2, 3
+- [ ] On selection change, store `currentModelId` in store and use it for run_thread options.name.
+  - Requirements: 3
+- [ ] Disable/enable reasoning/web search toggles based on selected model capabilities (supported_parameters/modalities).
+  - Requirements: 3
+
+## 5. Caching & Refresh
+
+- [ ] Use cached catalog if fetch fails; show toast and allow Retry.
+  - Requirements: 4, 5
+- [ ] Add manual Refresh to re-fetch models and update cache.
+  - Requirements: 4
+
+## 6. Error Handling & Perf
+
+- [ ] Add loading/empty/error states; debounce search; paginate or virtualize.
+  - Requirements: 5
+
+## 7. Tests
+
+- [ ] Unit: mapping and filter helpers; selection persistence.
+  - Requirements: 1, 2
+- [ ] Integration: selection drives dropdown; run_thread includes selected id; toggles reflect capabilities.
+  - Requirements: 2, 3
+- [ ] E2E: login → browse models → select → send → stream.
+  - Requirements: 1, 2, 3
+
+## 8. Docs
+
+- [ ] README: Add short guide to using the Model Catalog and picker.
+  - Requirements: 1, 2, 3
 ````
 
 ## File: AGENTS.md
@@ -3797,114 +4612,6 @@ const onSelect = (item: any) => {
 </script>
 ````
 
-## File: packages/app/app/composables/useModelStore.ts
-````typescript
-export const useModelStore = defineStore("model", () => {
-  const models = ref([
-    {
-      label: "DeepSeek: R1 0528 (free)",
-      apiModel: "deepseek/deepseek-r1-0528:free",
-      imageUploads: false,
-      webSearch: false,
-      pdfUploads: false,
-      reasoningAbility: true,
-      generateImage: false,
-      keyPlatforms: ["openrouter"],
-    },
-    {
-      label: "DeepSeek: R1 Distill Qwen 14B (free)",
-      apiModel: "deepseek/deepseek-r1-distill-qwen-14b:free",
-      imageUploads: false,
-      webSearch: false,
-      pdfUploads: false,
-      reasoningAbility: true,
-      generateImage: false,
-      keyPlatforms: ["openrouter"],
-    },
-  ]);
-
-  const modelsByCategory: Record<string, any> = ref({
-    openrouter: {
-      name: "OpenRouter",
-      keyName: "openrouter",
-      link: "https://openrouter.ai/keys",
-      apiKey: "",
-      image: "openrouter.ico",
-      models: [],
-      saving: false,
-    },
-  });
-
-  const categorizeModels = () => {
-    // Reset models arrays
-    Object.values(modelsByCategory.value).forEach((category: any) => {
-      category.models = [];
-    });
-
-    // Populate models by platform
-    models.value.forEach((model) => {
-      model.keyPlatforms.forEach((platform) => {
-        if (platform in modelsByCategory.value) {
-          modelsByCategory.value[platform].models.push(model);
-        }
-      });
-    });
-  };
-
-  const saveApiKey = async (platform: string) => {
-    const apiKey = modelsByCategory.value[platform].apiKey;
-    await setApiKeyInKV(platform, apiKey);
-  };
-
-  const setApiKeyInKV = async (platform: string, key: string) => {
-    const { $sync } = useNuxtApp();
-    try {
-      modelsByCategory.value[platform].saving = true;
-      if (platform === "openrouter") {
-        await $sync.setKV("openrouter_api_key", key);
-      }
-      showToast("Saved settings!");
-    } catch (error) {
-      console.error("Failed to save API key:", error);
-    } finally {
-      modelsByCategory.value[platform].saving = false;
-    }
-  };
-
-  function setApiKey(platform: string, key: string) {
-    if (platform in modelsByCategory.value) {
-      modelsByCategory.value[platform].apiKey = key;
-    }
-  }
-
-  if (import.meta.client) {
-    const { $sync } = useNuxtApp();
-
-    const fetchApiKeysFromKV = async () => {
-      try {
-        const savedOpenRouterKey = await $sync.getKV("openrouter_api_key");
-        if (savedOpenRouterKey) {
-          setApiKey("openrouter", savedOpenRouterKey);
-        }
-      } catch (error) {
-        console.error("Failed to load API key:", error);
-      }
-    };
-
-    fetchApiKeysFromKV();
-  }
-  // Run on initialization
-  categorizeModels();
-
-  return {
-    models,
-    modelsByCategory,
-    setApiKey,
-    saveApiKey,
-  };
-});
-````
-
 ## File: packages/app/app/layouts/chat.vue
 ````vue
 <template>
@@ -4092,6 +4799,233 @@ const handleDesktopSidebarResize = (size: number) => {
 </script>
 ````
 
+## File: packages/app/app/pages/openrouter-callback.vue
+````vue
+<template>
+  <div class="min-h-screen flex items-center justify-center p-6">
+    <div
+      class="w-full max-w-md rounded-xl border border-neutral-200/60 dark:border-neutral-800/60 bg-white/70 dark:bg-neutral-900/70 backdrop-blur p-5 text-center"
+    >
+      <p class="text-base font-medium mb-2">
+        {{ title }}
+      </p>
+      <p class="text-sm text-neutral-500 mb-4">
+        {{ subtitle }}
+      </p>
+      <div class="flex items-center justify-center gap-3">
+        <div
+          v-if="loading"
+          class="w-5 h-5 rounded-full border-2 border-neutral-300 border-t-neutral-700 dark:border-neutral-700 dark:border-t-white animate-spin"
+        />
+        <button
+          v-if="ready"
+          class="px-4 py-2 rounded-md bg-primary-600 text-white hover:bg-primary-500"
+          @click="goHome"
+        >
+          Continue
+        </button>
+        <button
+          v-if="errorMessage"
+          class="px-4 py-2 rounded-md bg-amber-600 text-white hover:bg-amber-500"
+          @click="goHome"
+        >
+          Go Home
+        </button>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup>
+const route = useRoute();
+const router = useRouter();
+const rc = useRuntimeConfig();
+
+const loading = ref(true);
+const ready = ref(false);
+const redirecting = ref(false);
+const errorMessage = ref("");
+const title = computed(() =>
+  errorMessage.value
+    ? "Login completed with warnings"
+    : ready.value
+      ? "Login complete"
+      : "Completing login…",
+);
+const subtitle = computed(() => {
+  if (errorMessage.value) return errorMessage.value;
+  if (ready.value && !redirecting.value)
+    return "If this page doesn’t redirect automatically, tap Continue.";
+  return "Please wait while we finish setup.";
+});
+
+function log(...args) {
+  try {
+    // eslint-disable-next-line no-console
+    console.log("[openrouter-callback]", ...args);
+  } catch {}
+}
+
+async function setKVNonBlocking(key, value, timeoutMs = 300) {
+  try {
+    const { $sync } = useNuxtApp();
+    if (!$sync?.setKV) return;
+    log(`syncing key to KV via $sync.setKV (timeout ${timeoutMs}ms)`);
+    const result = await Promise.race([
+      $sync.setKV(key, value),
+      new Promise((res) => setTimeout(() => res("timeout"), timeoutMs)),
+    ]);
+    if (result === "timeout") log("setKV timed out; continuing");
+    else log("setKV resolved");
+  } catch (e) {
+    log("setKV failed", e?.message || e);
+  }
+}
+
+async function goHome() {
+  redirecting.value = true;
+  log("goHome() invoked. Trying router.replace('/').");
+  try {
+    await router.replace("/");
+    log("router.replace('/') resolved");
+  } catch (e) {
+    log("router.replace('/') failed:", e?.message || e);
+  }
+  try {
+    // Fallback to full document navigation
+    log("Attempting window.location.replace('/')");
+    window.location.replace("/");
+  } catch (e) {
+    log("window.location.replace('/') failed:", e?.message || e);
+  }
+  // Last-chance fallback on browsers that ignore replace
+  setTimeout(() => {
+    try {
+      log("Attempting final window.location.assign('/')");
+      window.location.assign("/");
+    } catch (e) {
+      log("window.location.assign('/') failed:", e?.message || e);
+    }
+  }, 150);
+}
+
+onMounted(async () => {
+  log("mounted at", window.location.href, "referrer:", document.referrer);
+  const code = route.query.code;
+  const state = route.query.state;
+  const verifier = sessionStorage.getItem("openrouter_code_verifier");
+  const savedState = sessionStorage.getItem("openrouter_state");
+  const codeMethod = sessionStorage.getItem("openrouter_code_method") || "S256";
+  log("query params present:", { code: Boolean(code), state: Boolean(state) });
+  log("session present:", {
+    verifier: Boolean(verifier),
+    savedState: Boolean(savedState),
+    codeMethod,
+  });
+
+  if (!code || !verifier) {
+    console.error("[openrouter-callback] Missing code or verifier");
+    loading.value = false;
+    ready.value = true;
+    errorMessage.value = "Missing code or verifier. Tap Continue to return.";
+    return;
+  }
+  if (savedState && state !== savedState) {
+    console.error("[openrouter-callback] State mismatch, potential CSRF", {
+      incoming: state,
+      savedState,
+    });
+    loading.value = false;
+    ready.value = true;
+    errorMessage.value = "State mismatch. Tap Continue to return.";
+    return;
+  }
+
+  try {
+    // Call OpenRouter directly per docs: https://openrouter.ai/api/v1/auth/keys
+    log("exchanging code with OpenRouter", {
+      endpoint: "https://openrouter.ai/api/v1/auth/keys",
+      codeLength: String(code).length,
+      method: codeMethod,
+      usingHTTPS: true,
+    });
+    const directResp = await fetch("https://openrouter.ai/api/v1/auth/keys", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        code: String(code),
+        code_verifier: verifier,
+        code_challenge_method: codeMethod,
+      }),
+    });
+    const directJson = await directResp.json().catch(async () => {
+      const text = await directResp.text().catch(() => "<no-body>");
+      log("non-JSON response body snippet:", text?.slice(0, 300));
+      return null;
+    });
+    if (!directResp.ok || !directJson) {
+      console.error(
+        "[openrouter-callback] Direct exchange failed",
+        directResp.status,
+        directJson,
+      );
+      return;
+    }
+    const userKey = directJson.key || directJson.access_token;
+    if (!userKey) {
+      console.error("[openrouter-callback] Direct exchange returned no key", {
+        keys: Object.keys(directJson || {}),
+      });
+      return;
+    }
+    // store in localStorage for use by front-end
+    log("storing key in localStorage (length)", String(userKey).length);
+    localStorage.setItem("openrouter_api_key", userKey);
+    try {
+      log("dispatching openrouter:connected event");
+      window.dispatchEvent(new CustomEvent("openrouter:connected"));
+      // Best-effort: also persist to synced KV
+      try {
+        await setKVNonBlocking("openrouter_api_key", userKey, 300);
+      } catch {}
+    } catch {}
+    log("clearing session markers (verifier/state/method)");
+    sessionStorage.removeItem("openrouter_code_verifier");
+    sessionStorage.removeItem("openrouter_state");
+    sessionStorage.removeItem("openrouter_code_method");
+    // Allow event loop to process storage events in other tabs/components
+    await new Promise((r) => setTimeout(r, 10));
+    loading.value = false;
+    ready.value = true;
+    log("ready to redirect");
+    // Attempt auto-redirect but keep the Continue button visible
+    setTimeout(() => {
+      // first SPA attempt
+      log("auto: router.replace('/')");
+      router.replace("/").catch((e) => {
+        log("auto: router.replace failed", e?.message || e);
+      });
+      // then a hard replace if SPA was blocked
+      setTimeout(() => {
+        try {
+          log("auto: window.location.replace('/')");
+          window.location.replace("/");
+        } catch (e) {
+          log("auto: window.location.replace failed", e?.message || e);
+        }
+      }, 250);
+    }, 50);
+  } catch (err) {
+    console.error("[openrouter-callback] Exchange failed", err);
+    loading.value = false;
+    ready.value = true;
+    errorMessage.value =
+      "Authentication finished, but we couldn’t auto-redirect.";
+  }
+});
+</script>
+````
+
 ## File: .env.example
 ````
 ALCHEMY_PASSWORD=please_change_this_to_a_random_string
@@ -4139,6 +5073,75 @@ logs
 wrangler.jsonc
 ````
 
+## File: packages/app/app/components/Reasoning.vue
+````vue
+<template>
+  <UAccordion
+    :items="items"
+    :ui="{
+      root: 'rounded-lg px-2 bg-neutral-100 dark:bg-neutral-800',
+      content: 'px-2 pb-2',
+      body: 'text-md',
+      trigger: 'cursor-pointer relative',
+      trailingIcon:
+        'group-data-[state=open]:rotate-0 group-data-[state=closed]:-rotate-90 absolute left-0',
+    }"
+  >
+    <template #default="{ item }">
+      <p class="text-[15px] font-medium ml-8">{{ item.label }}</p>
+    </template>
+    <template #content>
+      <MarkdownRenderer :content="content" />
+    </template>
+  </UAccordion>
+</template>
+
+<script setup lang="ts">
+import type { AccordionItem } from "@nuxt/ui";
+interface Props {
+  content: string;
+}
+const { content } = defineProps<Props>();
+const items = ref<AccordionItem[]>([
+  {
+    label: "Reasoning",
+  },
+]);
+
+// preprocess markdown
+onMounted(() => {
+  processMarkdownChunk(content);
+});
+</script>
+````
+
+## File: package.json
+````json
+{
+  "name": "nuxflare-chat",
+  "version": "0.0.0",
+  "scripts": {
+    "deploy": "nuxflare deploy",
+    "format": "prettier -w ."
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "devDependencies": {
+    "prettier": "3.6.0"
+  },
+  "dependencies": {
+    "alchemy": "^0.40.1"
+  },
+  "trustedDependencies": [
+    "@nuxflare-chat/app",
+    "@parcel/watcher",
+    "@swc/core",
+    "@tailwindcss/oxide"
+  ]
+}
+````
+
 ## File: packages/api/types.ts
 ````typescript
 import * as v from "valibot";
@@ -4166,6 +5169,8 @@ const ModelOptionsSchema = v.object({
   name: v.string(),
   thinkingBudget: v.optional(v.picklist(["low", "medium", "high"])),
   webSearch: v.optional(v.boolean()),
+  // Allow client to pass OpenRouter API key per request; server requires it for run_thread
+  openrouterApiKey: v.optional(v.string()),
 });
 
 const MessageDataSchema = v.object({
@@ -4266,201 +5271,6 @@ export type SyncEvent = {
   clock: number;
   data: any;
 };
-````
-
-## File: packages/app/app/components/Reasoning.vue
-````vue
-<template>
-  <UAccordion
-    :items="items"
-    :ui="{
-      root: 'rounded-lg px-2 bg-neutral-100 dark:bg-neutral-800',
-      content: 'px-2 pb-2',
-      body: 'text-md',
-      trigger: 'cursor-pointer relative',
-      trailingIcon:
-        'group-data-[state=open]:rotate-0 group-data-[state=closed]:-rotate-90 absolute left-0',
-    }"
-  >
-    <template #default="{ item }">
-      <p class="text-[15px] font-medium ml-8">{{ item.label }}</p>
-    </template>
-    <template #content>
-      <MarkdownRenderer :content="content" />
-    </template>
-  </UAccordion>
-</template>
-
-<script setup lang="ts">
-import type { AccordionItem } from "@nuxt/ui";
-interface Props {
-  content: string;
-}
-const { content } = defineProps<Props>();
-const items = ref<AccordionItem[]>([
-  {
-    label: "Reasoning",
-  },
-]);
-
-// preprocess markdown
-onMounted(() => {
-  processMarkdownChunk(content);
-});
-</script>
-````
-
-## File: packages/app/app/components/Settings.vue
-````vue
-<template>
-  <div
-    class="w-full lg:w-[800px] p-4 lg:p-8 flex flex-col lg:flex-row justify-between items-start gap-5 lg:gap-10 bg-neutral-100/40 dark:bg-neutral-700/30 backdrop-blur-md rounded-xl"
-  >
-    <!-- user -->
-    <div class="flex flex-col items-center gap-4 flex-1/3">
-      <UAvatar
-        :src="image"
-        :alt="name"
-        :ui="{
-          root: 'w-20 h-20 lg:w-30 lg:h-30 bg-primary-800/80',
-          fallback: 'text-white/80',
-        }"
-      />
-      <div class="text-center space-y-1">
-        <p class="font-bold text-lg">{{ name }}</p>
-        <p
-          class="text-neutral-800 dark:text-neutral-400 flex items-center gap-1"
-        >
-          {{ email }}
-        </p>
-      </div>
-    </div>
-
-    <UAccordion
-      :items="Object.values(modelsByCategory)"
-      :ui="{
-        root: 'w-2/3',
-        item: 'p-2.5 my-4 rounded-lg ring ring-neutral-300/40 dark:ring-neutral-700/40 bg-white dark:bg-neutral-900',
-        trigger: 'cursor-pointer p-0.5',
-        leadingIcon: '',
-      }"
-    >
-      <template #default="{ item }">
-        <div class="flex items-center gap-2">
-          <img v-if="item.image" src="/openrouter.ico" alt="" class="w-5" />
-          <p class="text-md font-medium dark:text-primary-50">
-            {{ item.name }} API Key
-          </p>
-        </div>
-      </template>
-      <template #content="{ item }">
-        <div class="rounded-lg p-4 mx-auto w-full mt-2">
-          <!-- show pills here -->
-          <div v-if="item.models" class="flex flex-wrap gap-2 mb-4">
-            <span
-              v-for="model in item.models"
-              class="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-light bg-primary-100 text-primary-800 dark:bg-primary-700/50 dark:text-white"
-            >
-              {{ model.label }}
-            </span>
-          </div>
-
-          <div class="flex flex-col items-start justify-center mt-6">
-            <UInput
-              v-model="item.apiKey"
-              size="xl"
-              placeholder="Your API Key"
-              type="password"
-              class="w-full"
-              :ui="{
-                base: 'ring-neutral-600/50 focus-visible:ring-neutral-500/80',
-              }"
-            />
-            <p class="text-sm text-neutral-400 mt-1">
-              Get your key from
-              <NuxtLink
-                :to="item.link"
-                target="_blank"
-                external
-                class="px-0 text-primary-400 hover:text-primary-500"
-                >{{ item.name }} console</NuxtLink
-              >.
-            </p>
-
-            <UButton
-              size="lg"
-              color="primary"
-              variant="solid"
-              label="Save"
-              class="ml-auto mt-5"
-              @click="modelStore.saveApiKey(item.keyName)"
-              :loading="item.saving"
-              :ui="{
-                base: 'bg-primary-700 hover:bg-primary-600 text-white',
-              }"
-            />
-            <UButton
-              size="lg"
-              color="neutral"
-              variant="outline"
-              label="Login with OpenRouter"
-              class="ml-4 mt-5"
-              type="button"
-              @click.prevent.stop="startLogin"
-            />
-          </div>
-        </div>
-      </template>
-    </UAccordion>
-  </div>
-</template>
-
-<script setup lang="ts">
-// 'useAuth' may be provided by the app's auth plugin via auto-imports — declare so TS won't error
-declare const useAuth: any;
-
-import { useOpenRouterAuth } from "../composables/useOpenRouterAuth";
-
-const user =
-  typeof useAuth === "function"
-    ? useAuth().sessionState
-    : ref({ value: { user: {} } });
-const name = computed(() => user.value.user?.name);
-const image = computed(() => user.value.user?.image);
-const email = computed(() => user.value.user?.email);
-
-const modelStore = useModelStore();
-const { modelsByCategory } = storeToRefs(modelStore);
-
-const { startLogin } = useOpenRouterAuth();
-</script>
-````
-
-## File: package.json
-````json
-{
-  "name": "nuxflare-chat",
-  "version": "0.0.0",
-  "scripts": {
-    "deploy": "nuxflare deploy",
-    "format": "prettier -w ."
-  },
-  "workspaces": [
-    "packages/*"
-  ],
-  "devDependencies": {
-    "prettier": "3.6.0"
-  },
-  "dependencies": {
-    "alchemy": "^0.40.1"
-  },
-  "trustedDependencies": [
-    "@nuxflare-chat/app",
-    "@parcel/watcher",
-    "@swc/core",
-    "@tailwindcss/oxide"
-  ]
-}
 ````
 
 ## File: packages/api/wrangler.toml
@@ -5006,251 +5816,306 @@ const blocks = computed(() =>
 </script>
 ````
 
-## File: packages/app/app/components/Sidebar.vue
-````vue
-<template>
-  <div
-    class="flex flex-col p-0 h-screen overflow-y-auto scrollbar-custom relative sidebar-bg"
-  >
-    <div class="sticky top-0 p-5 space-y-4 z-10 sidebar-bg">
-      <div class="w-full flex w-full justify-between items-center">
-        <UButton
-          icon="i-lucide-panel-left"
-          variant="ghost"
-          @click="$emit('toggle')"
-        />
+## File: packages/app/app/composables/useModelStore.ts
+````typescript
+import modelsService, {
+  type OpenRouterModel,
+  type PriceBucket,
+} from "~/utils/models-service";
 
-        <div class="flex items-center gap-1">
-          <span class="text-lg font-bold text-neutral-500 dark:text-neutral-300"
-            >Nuxflare Chat</span
-          >
-        </div>
-
-        <UModal :overlay="false" v-model:open="searchRef">
-          <UButton icon="i-lucide-search" variant="ghost" />
-          <template #content>
-            <SearchBox />
-          </template>
-        </UModal>
-      </div>
-
-      <div>
-        <UButton
-          actions
-          @click="$emit('new')"
-          to="/"
-          variant="subtle"
-          block
-          size="xl"
-          >New Chat</UButton
-        >
-      </div>
-    </div>
-
-    <div class="space-y-4 p-5">
-      <ChatThread
-        v-if="pinnedThreadsFromStore.pinned?.length"
-        :threads="pinnedThreadsFromStore"
-        :pinned="true"
-      />
-      <ChatThread :threads="groupedThreadsFromStore" :pinned="false" />
-      <div class="h-10" />
-    </div>
-  </div>
-
-  <!-- account -->
-  <UPopover
-    @update:open="
-      (isOpen: boolean) => {
-        popperOpen = isOpen ? true : false;
-      }
-    "
-    class="sticky left-0 bottom-0 w-full z-10 sidebar-bg"
-    :open="popperOpen"
-  >
-    <div class="p-2 border-t border-neutral-300 dark:border-neutral-800">
-      <div
-        class="p-2.5 flex justify-between items-center hover:bg-white hover:dark:bg-primary-200/10 rounded-lg"
-        ref="pop"
-      >
-        <div class="space-x-2 flex items-center">
-          <UAvatar
-            :src="image"
-            size="xs"
-            :alt="name"
-            :ui="{ root: 'bg-primary-800/80', fallback: 'text-white/80' }"
-          />
-          <span
-            class="select-none text-sm font-medium text-neutral-800 dark:text-neutral-300"
-            >{{ name }}</span
-          >
-          <!-- OpenRouter logo + connection dot -->
-          <div class="flex items-center gap-2 ml-2">
-            <!-- small OpenRouter logo -->
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 512 512"
-              xmlns="http://www.w3.org/2000/svg"
-              fill="currentColor"
-              stroke="currentColor"
-              class="text-neutral-500 dark:text-neutral-300"
-            >
-              <g clip-path="url(#clip0_205_3)">
-                <path
-                  d="M3 248.945C18 248.945 76 236 106 219C136 202 136 202 198 158C276.497 102.293 332 120.945 423 120.945"
-                  stroke-width="90"
-                />
-                <path d="M511 121.5L357.25 210.268L357.25 32.7324L511 121.5Z" />
-                <path
-                  d="M0 249C15 249 73 261.945 103 278.945C133 295.945 133 295.945 195 339.945C273.497 395.652 329 377 420 377"
-                  stroke-width="90"
-                />
-                <path
-                  d="M508 376.445L354.25 287.678L354.25 465.213L508 376.445Z"
-                />
-              </g>
-            </svg>
-            <span
-              :title="
-                openrouterConnected
-                  ? 'OpenRouter connected'
-                  : 'OpenRouter disconnected'
-              "
-              :class="[
-                'w-3 h-3 rounded-full inline-block',
-                openrouterConnected ? 'bg-green-500' : 'bg-red-500',
-              ]"
-              aria-hidden="true"
-            />
-          </div>
-        </div>
-
-        <UIcon
-          name="i-heroicons:chevron-up-down"
-          class="size-5 hover:text-black dark:hover:text-white"
-        />
-      </div>
-    </div>
-
-    <template #content>
-      <div
-        class="p-1 bg-white dark:bg-black rounded-lg w-[var(--width)]"
-        :style="cssVars"
-      >
-        <div
-          v-for="action in actions"
-          :key="action.icon"
-          class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800/70 font-semibold cursor-pointer"
-          @click="action.action()"
-        >
-          <UIcon :name="action.icon" class="size-4" />
-          <span>{{ action.name }}</span>
-        </div>
-      </div>
-    </template>
-  </UPopover>
-</template>
-
-<script setup lang="ts">
-const route = useRoute();
-const { searchRef } = useSearchRef();
-const { settingsRef } = useSettingsRef();
-const emit = defineEmits(["toggle", "new"]);
-const pop = useTemplateRef("pop");
-
-const user = ref({
-  user: {
-    name: "User",
-    image: "path/to/image.jpg",
-  },
-});
-const name = computed(() => user.value.user?.name);
-const image = computed(() => user.value.user?.image);
-const { width } = useElementBounding(pop);
-const popperOpen = ref(false);
-
-const cssVars = computed(() => ({
-  "--width": `${width.value}px`,
-}));
-
-const actions = [
-  {
-    icon: "i-lucide:settings",
-    name: "Settings",
-    action: () => {
-      settingsRef.value = true;
-      popperOpen.value = false;
+export const useModelStore = defineStore("model", () => {
+  const models = ref([
+    {
+      label: "DeepSeek: R1 0528 (free)",
+      apiModel: "deepseek/deepseek-r1-0528:free",
+      imageUploads: false,
+      webSearch: false,
+      pdfUploads: false,
+      reasoningAbility: true,
+      generateImage: false,
+      keyPlatforms: ["openrouter"],
     },
-  },
-  {
-    icon: "i-heroicons-solid:logout",
-    name: "Logout",
-    action: async () => {
-      console.log("implement");
+    {
+      label: "DeepSeek: R1 Distill Qwen 14B (free)",
+      apiModel: "deepseek/deepseek-r1-distill-qwen-14b:free",
+      imageUploads: false,
+      webSearch: false,
+      pdfUploads: false,
+      reasoningAbility: true,
+      generateImage: false,
+      keyPlatforms: ["openrouter"],
     },
-  },
-];
+  ]);
 
-const threadsStore = useThreadsStore();
-const {
-  pinnedThreads: pinnedThreadsFromStore,
-  unpinnedThreads: groupedThreadsFromStore,
-} = storeToRefs(threadsStore);
+  const modelsByCategory: Record<string, any> = ref({
+    openrouter: {
+      name: "OpenRouter",
+      keyName: "openrouter",
+      link: "https://openrouter.ai/keys",
+      apiKey: "",
+      image: "openrouter.ico",
+      models: [],
+      saving: false,
+    },
+  });
 
-const openrouterConnected = ref(false);
+  // Model catalog placeholder must be declared before categorization runs so
+  // categorizeModels can include fetched models in its pool during store init.
+  const catalog = ref<OpenRouterModel[]>([]);
 
-async function checkOpenRouterKey() {
-  // Check fast client storage first
-  const localKey =
-    typeof window !== "undefined"
-      ? localStorage.getItem("openrouter_api_key")
-      : null;
-  if (localKey) {
-    openrouterConnected.value = true;
-    return;
-  }
-  // Then check synced KV
-  try {
+  const categorizeModels = () => {
+    // Reset models arrays
+    Object.values(modelsByCategory.value).forEach((category: any) => {
+      category.models = [];
+    });
+
+    // Build a single pool combining any hardcoded 'models' and the fetched 'catalog'
+    // This allows the UI (accordion pills, selectors) to show fetched models as well.
+    const pool = [...models.value, ...catalog.value];
+
+    // Populate models by platform, avoid duplicates by `id` when present
+    pool.forEach((model: any) => {
+      const platforms: string[] = model.keyPlatforms || [];
+      platforms.forEach((platform) => {
+        if (platform in modelsByCategory.value) {
+          const list = modelsByCategory.value[platform].models as any[];
+          const hasId = typeof model.id === "string" && model.id.length > 0;
+          const exists = hasId
+            ? list.some((m) => m && m.id === model.id)
+            : false;
+          if (!exists) list.push(model);
+        }
+      });
+    });
+  };
+
+  const saveApiKey = async (platform: string) => {
+    const apiKey = modelsByCategory.value[platform].apiKey;
+    // persist locally for immediate UX and client-run usage
+    if (platform === "openrouter" && typeof window !== "undefined") {
+      if (apiKey) localStorage.setItem("openrouter_api_key", apiKey);
+      else localStorage.removeItem("openrouter_api_key");
+      try {
+        window.dispatchEvent(new CustomEvent("openrouter:connected"));
+      } catch {}
+    }
+    await setApiKeyInKV(platform, apiKey);
+  };
+
+  const setApiKeyInKV = async (platform: string, key: string) => {
     const { $sync } = useNuxtApp();
-    const kvKey = await $sync.getKV("openrouter_api_key").catch(() => null);
-    openrouterConnected.value = !!kvKey;
-  } catch (e) {
-    openrouterConnected.value = false;
-  }
-}
-
-onMounted(() => {
-  checkOpenRouterKey();
-  if (typeof window !== "undefined") {
-    window.addEventListener("storage", (e) => {
-      if (e.key === "openrouter_api_key") checkOpenRouterKey();
-    });
-    // also react to our custom event fired on successful OAuth exchange
-    window.addEventListener("openrouter:connected", () => {
-      checkOpenRouterKey();
-    });
-    document.addEventListener("visibilitychange", () => {
-      if (document.visibilityState === "visible") {
-        checkOpenRouterKey();
+    try {
+      modelsByCategory.value[platform].saving = true;
+      if (platform === "openrouter") {
+        await $sync.setKV("openrouter_api_key", key);
       }
+      showToast("Saved settings!");
+    } catch (error) {
+      console.error("Failed to save API key:", error);
+    } finally {
+      modelsByCategory.value[platform].saving = false;
+    }
+  };
+
+  function setApiKey(platform: string, key: string) {
+    if (platform in modelsByCategory.value) {
+      modelsByCategory.value[platform].apiKey = key;
+    }
+  }
+
+  if (import.meta.client) {
+    const { $sync } = useNuxtApp();
+
+    const fetchApiKeysFromKV = async () => {
+      try {
+        const savedOpenRouterKey = await $sync.getKV("openrouter_api_key");
+        if (savedOpenRouterKey) {
+          setApiKey("openrouter", savedOpenRouterKey);
+        }
+      } catch (error) {
+        console.error("Failed to load API key:", error);
+      }
+    };
+
+    fetchApiKeysFromKV();
+  }
+  // Run on initialization
+  categorizeModels();
+
+  // Re-categorize whenever fetched catalog changes so UI updates reactively
+  try {
+    watch(catalog, () => {
+      categorizeModels();
+    });
+  } catch (e) {
+    // watch may not be available in some test environments; swallow safely
+  }
+
+  const selectedModelIds = ref<string[]>([]);
+  const searchQuery = ref("");
+  const filters = ref<{
+    input?: string[];
+    output?: string[];
+    minContext?: number;
+    parameters?: string[];
+    price?: PriceBucket;
+  }>({});
+
+  const selectedModels = computed(() =>
+    catalog.value.filter((m) => selectedModelIds.value.includes(m.id)),
+  );
+
+  const filteredCatalog = computed(() => {
+    let list = [...catalog.value];
+    if (searchQuery.value)
+      list = modelsService.filterByText(list, searchQuery.value);
+    if (filters.value.input?.length || filters.value.output?.length) {
+      list = modelsService.filterByModalities(list, {
+        input: filters.value.input,
+        output: filters.value.output,
+      });
+    }
+    if (filters.value.minContext)
+      list = modelsService.filterByContextLength(
+        list,
+        filters.value.minContext,
+      );
+    if (filters.value.parameters?.length)
+      list = modelsService.filterByParameters(list, filters.value.parameters);
+    if (filters.value.price)
+      list = modelsService.filterByPriceBucket(list, filters.value.price);
+    return list;
+  });
+
+  async function fetchModels(opts?: { force?: boolean; ttlMs?: number }) {
+    const list = await modelsService.fetchModels(opts);
+    catalog.value = list;
+    // Update categorized lists so fetched models show up in UI sections
+    categorizeModels();
+    return list;
+  }
+
+  function filterModels(
+    q: string,
+    f?: Partial<{
+      input: string[];
+      output: string[];
+      minContext: number;
+      parameters: string[];
+      price: PriceBucket;
+    }>,
+  ) {
+    searchQuery.value = q || "";
+    filters.value = { ...filters.value, ...(f || {}) };
+    return filteredCatalog.value;
+  }
+
+  function toggleSelected(id: string) {
+    const i = selectedModelIds.value.indexOf(id);
+    if (i >= 0) selectedModelIds.value.splice(i, 1);
+    else selectedModelIds.value.push(id);
+  }
+
+  function saveSelectionLocal() {
+    try {
+      if (typeof window === "undefined") return;
+      localStorage.setItem(
+        "openrouter_selected_models",
+        JSON.stringify(selectedModelIds.value),
+      );
+    } catch {}
+  }
+
+  async function saveSelection() {
+    saveSelectionLocal();
+    try {
+      const { $sync } = useNuxtApp();
+      await $sync.setKV(
+        "openrouter_selected_models",
+        JSON.stringify(selectedModelIds.value),
+      );
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-call
+      showToast?.("Saved model selection!");
+    } catch (e) {
+      console.error("Failed to save selection to KV", e);
+    }
+  }
+
+  function loadSelectionLocal(): string[] | null {
+    try {
+      if (typeof window === "undefined") return null;
+      const raw = localStorage.getItem("openrouter_selected_models");
+      if (!raw) return null;
+      const arr = JSON.parse(raw);
+      return Array.isArray(arr)
+        ? arr.filter((x) => typeof x === "string")
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  async function loadSelection() {
+    // Prefer KV when available; use local as immediate fallback
+    const local = loadSelectionLocal();
+    if (local) selectedModelIds.value = [...new Set(local)];
+    try {
+      const { $sync } = useNuxtApp();
+      const kv = await $sync.getKV("openrouter_selected_models");
+      if (typeof kv === "string" && kv.length) {
+        const arr = JSON.parse(kv);
+        if (Array.isArray(arr)) {
+          selectedModelIds.value = [
+            ...new Set(arr.filter((x: unknown) => typeof x === "string")),
+          ] as string[];
+        }
+        saveSelectionLocal(); // keep local in sync
+      }
+    } catch (e) {
+      // KV may be unavailable offline; local already applied
+      console.warn("KV not available for selected models", e);
+    }
+    return selectedModelIds.value;
+  }
+
+  // Client bootstrap: restore selection ASAP on load
+  if (import.meta.client) {
+    // Run after this setup function has defined refs and functions
+    queueMicrotask(() => {
+      try {
+        const local = loadSelectionLocal();
+        if (local) selectedModelIds.value = [...new Set(local)];
+      } catch {}
+      // Then fetch from KV in background
+      void loadSelection();
     });
   }
-});
 
-watch(
-  () => route.fullPath,
-  () => {
-    checkOpenRouterKey();
-  },
-);
-</script>
+  return {
+    models,
+    modelsByCategory,
+    setApiKey,
+    saveApiKey,
+    setApiKeyInKV,
+    // catalog & selection
+    catalog,
+    selectedModelIds,
+    selectedModels,
+    filteredCatalog,
+    fetchModels,
+    filterModels,
+    toggleSelected,
+    saveSelection,
+    loadSelection,
+  };
+});
 ````
 
 ## File: packages/app/app/composables/usePromptStore.ts
 ````typescript
 import { useModelStore } from "./useModelStore";
 import { useThreadsStore } from "./useThreadsStore";
+import { uuidv4 } from "~/utils/uuid";
 
 export interface Prompt {
   threadId: string;
@@ -5323,7 +6188,7 @@ export const usePromptStore = defineStore("prompt", () => {
     } else {
       // first step
       if (!newChatId.value) {
-        newChatId.value = `new-${crypto.randomUUID()}`;
+        newChatId.value = `new-${uuidv4()}`;
         prompts.value[newChatId.value] = {
           threadId: newChatId.value,
           currentModel: defaultModel,
@@ -5555,104 +6420,6 @@ export const usePromptStore = defineStore("prompt", () => {
     initializePromptsFromThreads,
   };
 });
-````
-
-## File: packages/app/app/components/ModelSelector.vue
-````vue
-<template>
-  <USelectMenu
-    v-model="currentModel"
-    :searchInput="false"
-    color="neutral"
-    variant="ghost"
-    :items="models"
-    :content="{ align: 'start' }"
-    :ui="{
-      base: 'w-auto cursor-pointer text-neutral-700 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white light:hover:bg-neutral-200 dark:hover:bg-neutral-700/70',
-      label: 'text-xs',
-      input: 'border-none text-black data-highlighted:text-black',
-      content: 'w-auto max-h-200 dark:bg-black px-2',
-      item: 'text-neutral-700 dark:text-neutral-400 my-2 data-highlighted:bg-neutral-100 dark:data-highlighted:bg-neutral-800 rounded-md',
-      itemTrailingIcon: 'font-bold',
-    }"
-  >
-    <template #item="{ item }">
-      <div class="flex items-center justify-between gap-2 w-full">
-        <span>{{ item.label }}</span>
-        <div class="flex items-center gap-1.5 ml-2">
-          <UTooltip
-            v-for="icon in getModelIcons(item)"
-            :key="icon.ability"
-            :text="icon.tooltip"
-          >
-            <div
-              class="rounded-md flex items-center justify-center p-1"
-              :class="[icon.bgColor]"
-            >
-              <UIcon :name="icon.icon" class="w-4 h-4" :class="[icon.color]" />
-            </div>
-          </UTooltip>
-        </div>
-      </div>
-    </template>
-  </USelectMenu>
-</template>
-
-<script setup lang="ts">
-const promptStore = usePromptStore();
-const { currentModel } = storeToRefs(promptStore);
-const modelStore = useModelStore();
-const { models } = storeToRefs(modelStore);
-
-const icons = ref([
-  {
-    icon: "i-heroicons:photo",
-    ability: "imageUploads",
-    color: "text-green-400/80 dark:text-green-300",
-    bgColor: "bg-green-300/20",
-    tooltip: "Supports image uploads and analysis",
-    action: () => console.log("Image upload action"),
-  },
-  {
-    icon: "i-heroicons:globe-alt",
-    ability: "webSearch",
-    color: "text-indigo-400/80 dark:text-indigo-300",
-    bgColor: "bg-indigo-300/20",
-    tooltip: "Web search capabilities",
-    action: () => console.log("Web search action"),
-  },
-  {
-    icon: "i-heroicons:document-text",
-    ability: "pdfUploads",
-    color: "text-purple-400/80 dark:text-purple-300",
-    bgColor: "bg-purple-300/20",
-    tooltip: "PDF upload and processing",
-    action: () => console.log("PDF upload action"),
-  },
-  {
-    icon: "i-heroicons:light-bulb",
-    ability: "reasoningAbility",
-    color: "text-yellow-400/80 dark:text-yellow-300",
-    bgColor: "bg-yellow-300/20",
-    tooltip: "Advanced reasoning abilities",
-    action: () => console.log("Reasoning action"),
-  },
-  {
-    icon: "i-heroicons:sparkles",
-    ability: "generateImage",
-    color: "text-red-400/80 dark:text-red-300",
-    bgColor: "bg-red-300/20",
-    tooltip: "Image generation capabilities",
-    action: () => console.log("Image generation action"),
-  },
-]);
-
-const getModelIcons = (model: any) => {
-  return icons.value.filter((icon) => model[icon.ability]);
-};
-
-const emit = defineEmits(["changeModel"]);
-</script>
 ````
 
 ## File: packages/app/app/workers/database.ts
@@ -6298,6 +7065,154 @@ MIT - Go wild, build cool stuff.
 _Made with ☕_
 ````
 
+## File: packages/app/app/components/ModelSelector.vue
+````vue
+<template>
+  <USelectMenu
+    v-model="currentModel"
+    :searchInput="false"
+    color="neutral"
+    variant="ghost"
+    :items="selectorItems"
+    :content="{ align: 'start' }"
+    :ui="{
+      base: 'w-auto cursor-pointer text-neutral-700 hover:text-neutral-900 dark:text-neutral-400 dark:hover:text-white light:hover:bg-neutral-200 dark:hover:bg-neutral-700/70',
+      label: 'text-xs',
+      input: 'border-none text-black data-highlighted:text-black',
+      content: 'w-auto max-h-200 dark:bg-black px-2',
+      item: 'text-neutral-700 dark:text-neutral-400 my-2 data-highlighted:bg-neutral-100 dark:data-highlighted:bg-neutral-800 rounded-md',
+      itemTrailingIcon: 'font-bold',
+    }"
+  >
+    <template #item="{ item }">
+      <div class="flex items-center justify-between gap-2 w-full">
+        <span>{{ item.label }}</span>
+        <div class="flex items-center gap-1.5 ml-2">
+          <UTooltip
+            v-for="icon in getModelIcons(item)"
+            :key="icon.ability"
+            :text="icon.tooltip"
+          >
+            <div
+              class="rounded-md flex items-center justify-center p-1"
+              :class="[icon.bgColor]"
+            >
+              <UIcon :name="icon.icon" class="w-4 h-4" :class="[icon.color]" />
+            </div>
+          </UTooltip>
+        </div>
+      </div>
+    </template>
+  </USelectMenu>
+</template>
+
+<script setup lang="ts">
+const promptStore = usePromptStore();
+const { currentModel } = storeToRefs(promptStore);
+const modelStore = useModelStore();
+const { models, selectedModels } = storeToRefs(modelStore);
+
+const icons = ref([
+  {
+    icon: "i-heroicons:photo",
+    ability: "imageUploads",
+    color: "text-green-400/80 dark:text-green-300",
+    bgColor: "bg-green-300/20",
+    tooltip: "Supports image uploads and analysis",
+    action: () => console.log("Image upload action"),
+  },
+  {
+    icon: "i-heroicons:globe-alt",
+    ability: "webSearch",
+    color: "text-indigo-400/80 dark:text-indigo-300",
+    bgColor: "bg-indigo-300/20",
+    tooltip: "Web search capabilities",
+    action: () => console.log("Web search action"),
+  },
+  {
+    icon: "i-heroicons:document-text",
+    ability: "pdfUploads",
+    color: "text-purple-400/80 dark:text-purple-300",
+    bgColor: "bg-purple-300/20",
+    tooltip: "PDF upload and processing",
+    action: () => console.log("PDF upload action"),
+  },
+  {
+    icon: "i-heroicons:light-bulb",
+    ability: "reasoningAbility",
+    color: "text-yellow-400/80 dark:text-yellow-300",
+    bgColor: "bg-yellow-300/20",
+    tooltip: "Advanced reasoning abilities",
+    action: () => console.log("Reasoning action"),
+  },
+  {
+    icon: "i-heroicons:sparkles",
+    ability: "generateImage",
+    color: "text-red-400/80 dark:text-red-300",
+    bgColor: "bg-red-300/20",
+    tooltip: "Image generation capabilities",
+    action: () => console.log("Image generation action"),
+  },
+]);
+
+const getModelIcons = (model: any) => {
+  return icons.value.filter((icon) => model[icon.ability]);
+};
+
+const emit = defineEmits(["changeModel"]);
+
+// Build selector items: prefer user's selected models (mapped) else fallback to default static models
+const selectorItems = computed(() => {
+  const list = selectedModels.value || [];
+  if (Array.isArray(list) && list.length) {
+    return list.map((m: any) => ({
+      label: m?.name || m?.id || "model",
+      apiModel: m?.id,
+      // derive capabilities from OpenRouter model shape
+      imageUploads: Array.isArray(m?.architecture?.input_modalities)
+        ? m.architecture.input_modalities.includes("image")
+        : false,
+      webSearch: Array.isArray(m?.supported_parameters)
+        ? m.supported_parameters.includes("web_search")
+        : false,
+      pdfUploads: false,
+      reasoningAbility: Array.isArray(m?.supported_parameters)
+        ? m.supported_parameters.includes("reasoning")
+        : false,
+      generateImage: false,
+      keyPlatforms: ["openrouter"],
+    }));
+  }
+  return models.value;
+});
+
+// Ensure currentModel remains valid when the available items change
+watch(
+  selectorItems,
+  (items) => {
+    if (!items || !items.length) return;
+    const cur = currentModel.value as any;
+    const same = items.find(
+      (x: any) => x?.apiModel === cur?.apiModel || x?.label === cur?.label,
+    );
+    if (!same) currentModel.value = items[0] as any;
+  },
+  { immediate: true },
+);
+
+onMounted(async () => {
+  // Make sure models and selection are loaded after a page refresh
+  try {
+    // fetchModels fills catalog for selectedModels mapping; cheap if cached
+    await modelStore.fetchModels();
+  } catch {}
+  try {
+    await modelStore.loadSelection();
+  } catch {}
+});
+</script>
+````
+
 ## File: packages/app/app/components/StreamingMessage.vue
 ````vue
 <template>
@@ -6675,66 +7590,859 @@ const app = await Nuxt("app", {
 await context.finalize();
 ````
 
-## File: packages/app/nuxt.config.ts
-````typescript
-// https://nuxt.com/docs/api/configuration/nuxt-config
-export default defineNuxtConfig({
-  compatibilityDate: "2024-11-01",
-  devtools: { enabled: true },
-  future: {
-    compatibilityVersion: 4,
-  },
-  build: {
-    transpile: ["wa-sqlite", "estree-walker"],
-  },
-  vite: {
-    optimizeDeps: {
-      exclude: ["wa-sqlite", "estree-walker"],
-    },
-  },
-  modules: [
-    "@nuxt/ui",
-    "@nuxt/fonts",
-    "@vueuse/nuxt",
-    "nuxt-svgo",
-    "@pinia/nuxt",
-    "nuxt-workers",
-  ],
-  app: {
-    head: {
-      link: [
-        {
-          rel: "stylesheet",
-          href: "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css",
-          integrity:
-            "sha384-5TcZemv2l/9On385z///+d7MSYlvIEw9FuZTIdZ14vJLqWphw7e7ZPuOiCHJcFCP",
-          crossorigin: "anonymous",
-        },
-      ],
-    },
-  },
-  runtimeConfig: {
-    public: {
-      apiUrl: "http://localhost:8787",
-      authUrl: "https://auth.chat.nuxflare.com",
-      authClientID: "nuxflare-chat",
-      sessionInterval: 5 * 60 * 1000,
-      openRouterRedirectUri: process.env.OPENROUTER_REDIRECT_URI || "",
-      openRouterAuthUrl: process.env.OPENROUTER_AUTH_URL || "",
-      openRouterClientId: process.env.OPENROUTER_CLIENT_ID || "",
-    },
-    openRouterClientId: process.env.OPENROUTER_CLIENT_ID || "",
-    openRouterClientSecret: process.env.OPENROUTER_CLIENT_SECRET || "",
-    openRouterAuthUrl: process.env.OPENROUTER_AUTH_URL || "",
-    openRouterTokenUrl: process.env.OPENROUTER_TOKEN_URL || "",
-    openRouterUserinfoUrl: process.env.OPENROUTER_USERINFO_URL || "",
-  },
-  css: ["~/assets/css/main.css"],
-  svgo: {
-    componentPrefix: "icon",
-    autoImportPath: "~/assets/icons",
+## File: packages/app/app/components/Settings.vue
+````vue
+<template>
+  <div
+    class="w-[98vw] md:w-[900px] md:max-w-[1000px] p-4 lg:p-6 flex flex-col gap-3 lg:gap-4 bg-neutral-100/40 dark:bg-neutral-700/30 backdrop-blur-md rounded-xl max-h-[90vh] overflow-hidden min-h-0 overscroll-contain"
+  >
+    <UAccordion
+      :items="categoryList"
+      :ui="{
+        root: 'w-full',
+        item: 'p-2 my-2 rounded-lg ring ring-neutral-300/40 dark:ring-neutral-700/40 bg-white dark:bg-neutral-900',
+        trigger: 'cursor-pointer p-0.5',
+        leadingIcon: '',
+      }"
+    >
+      <template #default="{ item }">
+        <div class="flex items-center gap-2">
+          <img v-if="item.image" src="/openrouter.ico" alt="" class="w-5" />
+          <p class="text-md font-medium dark:text-primary-50">
+            {{ item.name }} API Key
+          </p>
+        </div>
+      </template>
+      <template #content="{ item }">
+        <div class="rounded-lg p-3 mx-auto w-full mt-2">
+          <!-- show pills here -->
+          <div v-if="item.models" class="flex flex-wrap gap-2 mb-4">
+            <span
+              v-for="model in item.models"
+              class="inline-flex items-center px-3 py-1.5 rounded-full text-xs font-light bg-primary-100 text-primary-800 dark:bg-primary-700/50 dark:text-white"
+            >
+              {{ model.label }}
+            </span>
+          </div>
+
+          <div class="flex flex-col items-start justify-center mt-6">
+            <UInput
+              v-model="item.apiKey"
+              size="xl"
+              placeholder="Your API Key"
+              type="password"
+              class="w-full"
+              :ui="{
+                base: 'ring-neutral-600/50 focus-visible:ring-neutral-500/80',
+              }"
+            />
+            <p class="text-sm text-neutral-400 mt-1">
+              Get your key from
+              <NuxtLink
+                :to="item.link"
+                target="_blank"
+                external
+                class="px-0 text-primary-400 hover:text-primary-500"
+                >{{ item.name }} console</NuxtLink
+              >.
+            </p>
+
+            <UButton
+              size="lg"
+              color="primary"
+              variant="solid"
+              label="Save"
+              class="ml-auto mt-5"
+              @click="modelStore.saveApiKey(item.keyName)"
+              :loading="item.saving"
+              :ui="{
+                base: 'bg-primary-700 hover:bg-primary-600 text-white',
+              }"
+            />
+            <UButton
+              v-if="openrouterConnected"
+              size="lg"
+              color="neutral"
+              variant="ghost"
+              label="Logout"
+              class="ml-2 mt-5"
+              type="button"
+              @click.prevent.stop="logout"
+            />
+          </div>
+        </div>
+      </template>
+    </UAccordion>
+
+    <!-- Models Catalog Panel -->
+    <div
+      class="w-full mt-1 p-3 lg:p-4 rounded-lg ring ring-neutral-300/40 dark:ring-neutral-700/40 bg-white dark:bg-neutral-900 flex flex-col min-h-0 flex-1 overflow-hidden"
+    >
+      <div class="flex items-center justify-between gap-3 mb-3">
+        <div class="flex items-center gap-3 w-full">
+          <UInput
+            v-model="query"
+            placeholder="Search models by name or id…"
+            class="flex-1"
+            size="lg"
+            :ui="{
+              base: 'ring-neutral-600/50 focus-visible:ring-neutral-500/80',
+            }"
+            @input="applyFilters"
+          />
+          <UButton
+            color="primary"
+            variant="soft"
+            :loading="loading"
+            @click="refresh"
+            icon="i-lucide:refresh-cw"
+            label="Refresh"
+          />
+          <UButton
+            color="primary"
+            variant="solid"
+            class="ml-2"
+            :loading="saving"
+            @click="save"
+            icon="i-lucide:save"
+            label="Save"
+            :ui="{ base: 'bg-primary-700 hover:bg-primary-600 text-white' }"
+          />
+        </div>
+      </div>
+
+      <!-- Filter chips -->
+      <div class="flex flex-wrap items-center gap-2 mb-3">
+        <button
+          class="px-3 py-1.5 rounded-full text-xs font-medium border border-neutral-300/50 dark:border-neutral-700/50 hover:bg-neutral-100/60 dark:hover:bg-neutral-800/60"
+          :class="{
+            'bg-primary-100 text-primary-800 dark:bg-primary-700/40 dark:text-white':
+              inputImage,
+          }"
+          @click="
+            inputImage = !inputImage;
+            applyFilters();
+          "
+        >
+          Image input
+        </button>
+        <button
+          class="px-3 py-1.5 rounded-full text-xs font-medium border border-neutral-300/50 dark:border-neutral-700/50 hover:bg-neutral-100/60 dark:hover:bg-neutral-800/60"
+          :class="{
+            'bg-primary-100 text-primary-800 dark:bg-primary-700/40 dark:text-white':
+              needsReasoning,
+          }"
+          @click="
+            needsReasoning = !needsReasoning;
+            applyFilters();
+          "
+        >
+          Reasoning
+        </button>
+        <div class="flex items-center gap-2 ml-2">
+          <span class="text-xs text-neutral-500">Min context</span>
+          <UInput
+            v-model.number="minContext"
+            type="number"
+            class="w-24"
+            size="xs"
+            @change="applyFilters"
+          />
+        </div>
+        <div class="flex items-center gap-1 ml-2">
+          <span class="text-xs text-neutral-500">Price</span>
+          <select
+            v-model="price"
+            class="text-xs bg-transparent border border-neutral-300/50 dark:border-neutral-700/50 rounded-md px-2 py-1"
+            @change="applyFilters"
+          >
+            <option value="any">Any</option>
+            <option value="free">Free</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- List state -->
+      <div v-if="loading" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div
+          v-for="i in 6"
+          :key="i"
+          class="h-32 rounded-xl animate-pulse bg-neutral-200/60 dark:bg-neutral-800/60"
+        />
+      </div>
+      <div v-else class="flex-1 min-h-0 overflow-hidden flex flex-col">
+        <div
+          v-if="filteredCatalog.length === 0"
+          class="py-12 text-center text-neutral-500"
+        >
+          <p class="font-medium">No models match your filters.</p>
+          <UButton size="sm" variant="soft" class="mt-3" @click="resetFilters"
+            >Reset filters</UButton
+          >
+        </div>
+
+        <div v-else class="flex-1 min-h-0 flex flex-col">
+          <div
+            ref="listContainer"
+            class="flex-1 min-h-0 overflow-auto pr-2 pb-2 overscroll-contain"
+            style="-webkit-overflow-scrolling: touch; touch-action: pan-y"
+            @scroll="onScroll"
+            @wheel.passive="onWheel"
+          >
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 lg:gap-4">
+              <div
+                v-for="m in limitedCatalog"
+                :key="m.id"
+                class="group p-3 rounded-xl border border-neutral-200/60 dark:border-neutral-800/60 bg-neutral-50/60 dark:bg-neutral-900/50 hover:shadow-sm transition"
+              >
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <p
+                      class="truncate font-semibold text-neutral-900 dark:text-neutral-100"
+                    >
+                      {{ m.name || prettyId(m.id) }}
+                    </p>
+                    <p class="truncate text-xs text-neutral-500">{{ m.id }}</p>
+                  </div>
+                  <button
+                    class="inline-flex items-center justify-center w-8 h-8 rounded-full border border-neutral-300/50 dark:border-neutral-700/50 hover:bg-neutral-100/60 dark:hover:bg-neutral-800/60"
+                    :class="{
+                      'bg-primary-600 text-white border-primary-600':
+                        isSelected(m.id),
+                    }"
+                    @click="toggle(m.id)"
+                    :aria-pressed="isSelected(m.id)"
+                    :title="isSelected(m.id) ? 'Deselect' : 'Select'"
+                  >
+                    <span
+                      :class="
+                        isSelected(m.id) ? 'i-lucide:star' : 'i-lucide:star-off'
+                      "
+                      class="w-4 h-4"
+                    />
+                  </button>
+                </div>
+
+                <div class="mt-3 flex flex-wrap items-center gap-2">
+                  <span
+                    v-if="supportsTextIn(m)"
+                    class="px-2 py-1 rounded-md text-[10px] font-medium bg-neutral-200/60 dark:bg-neutral-800/60"
+                    >text</span
+                  >
+                  <span
+                    v-if="supportsImageIn(m)"
+                    class="px-2 py-1 rounded-md text-[10px] font-medium bg-neutral-200/60 dark:bg-neutral-800/60"
+                    >image</span
+                  >
+                  <span
+                    v-if="supportsReasoning(m)"
+                    class="px-2 py-1 rounded-md text-[10px] font-medium bg-amber-200/60 dark:bg-amber-900/40"
+                    >reasoning</span
+                  >
+                  <span
+                    v-if="supportsWebSearch(m)"
+                    class="px-2 py-1 rounded-md text-[10px] font-medium bg-sky-200/60 dark:bg-sky-900/40"
+                    >web search</span
+                  >
+                  <span class="ml-auto text-xs text-neutral-500"
+                    >ctx {{ contextLen(m) }}</span
+                  >
+                </div>
+
+                <div
+                  class="mt-2 flex items-center gap-3 text-[11px] text-neutral-600 dark:text-neutral-400"
+                >
+                  <span>prompt {{ pricePerM(m.pricing?.prompt) }}</span>
+                  <span>•</span>
+                  <span>completion {{ pricePerM(m.pricing?.completion) }}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="mt-4 flex items-center justify-between">
+        <p class="text-xs text-neutral-500">
+          Selected: {{ selectedModelIds.length }}
+        </p>
+        <UButton color="primary" :loading="saving" @click="save"
+          >Save selection</UButton
+        >
+      </div>
+    </div>
+  </div>
+</template>
+
+<script setup lang="ts">
+// 'useAuth' may be provided by the app's auth plugin via auto-imports — declare so TS won't error
+declare const useAuth: any;
+
+import { useOpenRouterAuth } from "../composables/useOpenRouterAuth";
+import showToast from "~/utils/showToast";
+
+// Track original body styles for scroll lock restore
+let lockedScrollY: number = 0;
+let originalBodyStyle: {
+  overflow?: string;
+  touchAction?: string;
+  position?: string;
+  top?: string;
+  left?: string;
+  right?: string;
+  width?: string;
+} = {};
+
+const user =
+  typeof useAuth === "function"
+    ? useAuth().sessionState
+    : ref({ value: { user: {} } });
+const name = computed(() => user.value.user?.name);
+const image = computed(() => user.value.user?.image);
+const email = computed(() => user.value.user?.email);
+
+const modelStore = useModelStore();
+const { modelsByCategory, catalog, filteredCatalog, selectedModelIds } =
+  storeToRefs(modelStore);
+
+const categoryList = computed(() => Object.values(modelsByCategory.value));
+
+const { startLogin, logoutOpenRouter } = useOpenRouterAuth();
+
+// when saving API key manually, also update localStorage and notify UI
+const originalSaveApiKey = modelStore.saveApiKey;
+modelStore.saveApiKey = async (platform: string) => {
+  await originalSaveApiKey(platform);
+  if (platform === "openrouter") {
+    const key = modelStore.modelsByCategory.openrouter.apiKey;
+    if (typeof window !== "undefined") {
+      if (key) localStorage.setItem("openrouter_api_key", key);
+      else localStorage.removeItem("openrouter_api_key");
+      try {
+        window.dispatchEvent(new CustomEvent("openrouter:connected"));
+      } catch {}
+    }
+  }
+};
+
+function logout() {
+  logoutOpenRouter();
+}
+
+// Connection indicator state for conditional Login/Logout visibility
+const openrouterConnected = ref(false);
+async function checkOpenRouterKey() {
+  const localKey =
+    typeof window !== "undefined"
+      ? localStorage.getItem("openrouter_api_key")
+      : null;
+  if (localKey) {
+    openrouterConnected.value = true;
+    return;
+  }
+  try {
+    const { $sync } = useNuxtApp();
+    const kvKey = await $sync.getKV("openrouter_api_key").catch(() => null);
+    openrouterConnected.value = !!kvKey;
+  } catch (e) {
+    openrouterConnected.value = false;
+  }
+}
+
+// Models panel state
+const loading = ref(false);
+const saving = ref(false);
+const query = ref("");
+const inputImage = ref(false);
+const needsReasoning = ref(false);
+const minContext = ref<number | null>(null);
+const price = ref<"any" | "free" | "low" | "medium">("any");
+// Virtualization
+const listContainer = ref<HTMLElement | null>(null);
+const cols = ref(1);
+
+// Lazy load batches on top of virtualization
+const pageSize = 400;
+const displayLimit = ref(pageSize);
+const limitedCatalog = computed(() =>
+  filteredCatalog.value.slice(0, displayLimit.value),
+);
+
+// compute a max-height for the inner list so the entire modal fits inside 90vh
+// height handled via flex layout (panel flex-col + list flex-1 min-h-0)
+
+function updateCols() {
+  const w = listContainer.value?.clientWidth || 0;
+  cols.value = w >= 768 ? 2 : 1;
+}
+
+// manual pad calculations removed; using useVirtualList instead
+
+// lazy-loading handled by watching limitedCatalog/displayLimit below
+
+watch([filteredCatalog, displayLimit], () => {
+  updateCols();
+  if (listContainer.value) listContainer.value.scrollTop = 0;
+});
+
+function onScroll(e?: Event) {
+  const el = (e?.target || listContainer.value) as HTMLElement | null;
+  if (!el) return;
+  const scrollEl = el instanceof HTMLElement ? el : listContainer.value;
+  const remaining =
+    (scrollEl?.scrollHeight || 0) -
+    (scrollEl?.scrollTop || 0) -
+    (scrollEl?.clientHeight || 0);
+  const thresholdPx = 400; // when within 400px of bottom, load more
+  if (
+    remaining < thresholdPx &&
+    displayLimit.value < filteredCatalog.value.length
+  ) {
+    displayLimit.value = Math.min(
+      displayLimit.value + pageSize,
+      filteredCatalog.value.length,
+    );
+  }
+}
+
+// Prevent wheel events from bubbling to the page when the inner list can scroll
+function onWheel(e: WheelEvent) {
+  const el = listContainer.value;
+  if (!el) return;
+  const atTop = el.scrollTop === 0;
+  const atBottom = Math.ceil(el.scrollTop + el.clientHeight) >= el.scrollHeight;
+  if ((e.deltaY < 0 && !atTop) || (e.deltaY > 0 && !atBottom)) {
+    e.stopPropagation();
+  }
+}
+
+function applyFilters() {
+  const params: string[] = [];
+  if (needsReasoning.value) params.push("reasoning");
+  modelStore.filterModels(query.value, {
+    input: inputImage.value ? ["image"] : undefined,
+    // output filter removed
+    minContext: Number(minContext.value || 0) || 0,
+    parameters: params.length ? params : undefined,
+    price: price.value,
+  });
+  // reset scroll
+  if (listContainer.value) listContainer.value.scrollTop = 0;
+  displayLimit.value = pageSize;
+  // displayLimit changed; virtual will update automatically
+}
+
+function resetFilters() {
+  query.value = "";
+  inputImage.value = false;
+  needsReasoning.value = false;
+  minContext.value = null;
+  price.value = "any";
+  applyFilters();
+  updateCols();
+  window.addEventListener("resize", () => {
+    updateCols();
+    // virtual adjusts on resize
+  });
+}
+
+function isSelected(id: string) {
+  return selectedModelIds.value.includes(id);
+}
+function toggle(id: string) {
+  modelStore.toggleSelected(id);
+}
+
+function contextLen(m: any) {
+  return m?.top_provider?.context_length ?? m?.context_length ?? 0;
+}
+function supportsTextIn(m: any) {
+  return (m?.architecture?.input_modalities || ["text"]).includes("text");
+}
+function supportsImageIn(m: any) {
+  return (m?.architecture?.input_modalities || []).includes("image");
+}
+function supportsReasoning(m: any) {
+  return (m?.supported_parameters || []).includes("reasoning");
+}
+function supportsWebSearch(m: any) {
+  return (m?.supported_parameters || []).includes("web_search");
+}
+function pricePerM(v?: string) {
+  if (!v) return "$0/1M";
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  const perM = n * 1_000_000;
+  const digits = perM < 0.1 ? 4 : perM < 1 ? 3 : 2;
+  return `$${perM.toFixed(digits)}/1M`;
+}
+function prettyId(id: string) {
+  const [firstPart] = (id || "").split(":");
+  const parts = (firstPart || "").split("/");
+  const last = parts[parts.length - 1] || "";
+  return last.replaceAll("-", " ");
+}
+
+async function refresh() {
+  loading.value = true;
+  try {
+    await modelStore.fetchModels({ force: true });
+    applyFilters();
+  } catch (e) {
+    showToast("Using cached models (refresh failed)", "error");
+  } finally {
+    loading.value = false;
+  }
+}
+
+async function save() {
+  saving.value = true;
+  try {
+    await modelStore.saveSelection();
+    showToast("Saved model selection");
+  } catch (e) {
+    showToast("Failed to save selection", "error");
+  } finally {
+    saving.value = false;
+  }
+}
+
+onMounted(async () => {
+  // Lock background scroll while the modal is open (mobile-safe, incl. iOS)
+  lockedScrollY = window.scrollY || window.pageYOffset || 0;
+  originalBodyStyle = {
+    overflow: document.body.style.overflow,
+    touchAction: document.body.style.touchAction,
+    position: document.body.style.position,
+    top: document.body.style.top,
+    left: document.body.style.left,
+    right: document.body.style.right,
+    width: document.body.style.width,
+  };
+  document.body.style.overflow = "hidden";
+  document.body.style.position = "fixed";
+  document.body.style.top = `-${lockedScrollY}px`;
+  document.body.style.left = "0";
+  document.body.style.right = "0";
+  document.body.style.width = "100%";
+
+  loading.value = true;
+  try {
+    await Promise.all([modelStore.fetchModels(), modelStore.loadSelection()]);
+    applyFilters();
+  } catch (e) {
+    showToast("Loaded from cache (network failed)", "error");
+  } finally {
+    loading.value = false;
+  }
+  await checkOpenRouterKey();
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", (e) => {
+      if (e.key === "openrouter_api_key") checkOpenRouterKey();
+    });
+    window.addEventListener("openrouter:connected", () => checkOpenRouterKey());
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") checkOpenRouterKey();
+    });
+  }
+});
+
+onBeforeUnmount(() => {
+  // Restore body scroll when modal closes
+  if (originalBodyStyle) {
+    document.body.style.overflow = originalBodyStyle.overflow || "";
+    document.body.style.touchAction = originalBodyStyle.touchAction || "";
+    document.body.style.position = originalBodyStyle.position || "";
+    document.body.style.top = originalBodyStyle.top || "";
+    document.body.style.left = originalBodyStyle.left || "";
+    document.body.style.right = originalBodyStyle.right || "";
+    document.body.style.width = originalBodyStyle.width || "";
+  }
+  // Restore scroll position
+  if (typeof window !== "undefined") {
+    window.scrollTo(0, lockedScrollY || 0);
+  }
+});
+</script>
+````
+
+## File: packages/app/app/components/Sidebar.vue
+````vue
+<template>
+  <div
+    class="flex flex-col p-0 h-screen overflow-y-auto scrollbar-custom relative sidebar-bg"
+  >
+    <div class="sticky top-0 p-5 space-y-4 z-10 sidebar-bg">
+      <div class="w-full flex justify-between items-center">
+        <UButton
+          icon="i-lucide-panel-left"
+          variant="ghost"
+          @click="$emit('toggle')"
+        />
+
+        <div class="flex items-center gap-1">
+          <span class="text-lg font-bold text-neutral-500 dark:text-neutral-300"
+            >Nuxflare Chat</span
+          >
+        </div>
+
+        <UModal :overlay="false" v-model:open="searchRef">
+          <UButton icon="i-lucide-search" variant="ghost" />
+          <template #content>
+            <SearchBox />
+          </template>
+        </UModal>
+      </div>
+
+      <div>
+        <UButton
+          actions
+          @click="$emit('new')"
+          to="/"
+          variant="subtle"
+          block
+          size="xl"
+          >New Chat</UButton
+        >
+      </div>
+    </div>
+
+    <div class="space-y-4 p-5">
+      <ChatThread
+        v-if="pinnedThreadsFromStore.pinned?.length"
+        :threads="pinnedThreadsFromStore"
+        :pinned="true"
+      />
+      <ChatThread :threads="groupedThreadsFromStore" :pinned="false" />
+      <div class="h-10" />
+    </div>
+  </div>
+
+  <!-- account -->
+  <UPopover
+    @update:open="
+      (isOpen: boolean) => {
+        popperOpen = isOpen ? true : false;
+      }
+    "
+    class="sticky left-0 bottom-0 w-full z-10 sidebar-bg"
+    :open="popperOpen"
+  >
+    <div class="p-2 border-t border-neutral-300 dark:border-neutral-800">
+      <div
+        class="p-2.5 flex justify-between items-center hover:bg-white hover:dark:bg-primary-200/10 rounded-lg"
+        ref="pop"
+      >
+        <div class="space-x-2 flex items-center">
+          <UAvatar
+            :src="image"
+            size="xs"
+            :alt="name"
+            :ui="{ root: 'bg-primary-800/80', fallback: 'text-white/80' }"
+          />
+          <span
+            class="select-none text-sm font-medium text-neutral-800 dark:text-neutral-300"
+            >{{ name }}</span
+          >
+          <!-- OpenRouter logo + connection dot -->
+          <div class="flex items-center gap-2 ml-2">
+            <!-- small OpenRouter logo -->
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 512 512"
+              xmlns="http://www.w3.org/2000/svg"
+              fill="currentColor"
+              stroke="currentColor"
+              class="text-neutral-500 dark:text-neutral-300"
+            >
+              <g clip-path="url(#clip0_205_3)">
+                <path
+                  d="M3 248.945C18 248.945 76 236 106 219C136 202 136 202 198 158C276.497 102.293 332 120.945 423 120.945"
+                  stroke-width="90"
+                />
+                <path d="M511 121.5L357.25 210.268L357.25 32.7324L511 121.5Z" />
+                <path
+                  d="M0 249C15 249 73 261.945 103 278.945C133 295.945 133 295.945 195 339.945C273.497 395.652 329 377 420 377"
+                  stroke-width="90"
+                />
+                <path
+                  d="M508 376.445L354.25 287.678L354.25 465.213L508 376.445Z"
+                />
+              </g>
+            </svg>
+            <span
+              :title="
+                openrouterConnected
+                  ? 'OpenRouter connected'
+                  : 'OpenRouter disconnected'
+              "
+              :class="[
+                'w-3 h-3 rounded-full inline-block',
+                openrouterConnected ? 'bg-green-500' : 'bg-red-500',
+              ]"
+              aria-hidden="true"
+            />
+          </div>
+        </div>
+
+        <UIcon
+          name="i-heroicons:chevron-up-down"
+          class="size-5 hover:text-black dark:hover:text-white"
+        />
+      </div>
+    </div>
+
+    <template #content>
+      <div
+        class="p-1 bg-white dark:bg-black rounded-lg w-[var(--width)]"
+        :style="cssVars"
+      >
+        <div
+          v-for="action in actions"
+          :key="action.icon"
+          class="flex items-center gap-2 px-3 py-2 text-sm hover:bg-neutral-100 dark:hover:bg-neutral-800/70 font-semibold cursor-pointer"
+          @click="action.action()"
+        >
+          <UIcon :name="action.icon" class="size-4" />
+          <span>{{ action.name }}</span>
+        </div>
+      </div>
+    </template>
+  </UPopover>
+</template>
+
+<script setup lang="ts">
+import { useOpenRouterAuth } from "../composables/useOpenRouterAuth";
+const route = useRoute();
+const { searchRef } = useSearchRef();
+const { settingsRef } = useSettingsRef();
+const emit = defineEmits(["toggle", "new"]);
+const pop = useTemplateRef("pop");
+
+const user = ref({
+  user: {
+    name: "User",
+    image: "path/to/image.jpg",
   },
 });
+const name = computed(() => user.value.user?.name);
+const image = computed(() => user.value.user?.image);
+const { width } = useElementBounding(pop);
+const popperOpen = ref(false);
+
+const cssVars = computed(() => ({
+  "--width": `${width.value}px`,
+}));
+
+const { startLogin, logoutOpenRouter } = useOpenRouterAuth?.() || {
+  startLogin: () => {},
+  logoutOpenRouter: () => {},
+};
+
+const actions = computed(() => {
+  const base = [
+    {
+      icon: "i-lucide:settings",
+      name: "Settings",
+      action: () => {
+        settingsRef.value = true;
+        popperOpen.value = false;
+      },
+    },
+  ];
+  if (openrouterConnected.value) {
+    base.push({
+      icon: "i-heroicons-solid:logout",
+      name: "Logout",
+      action: async () => {
+        popperOpen.value = false;
+        try {
+          await logoutOpenRouter();
+        } catch (e) {
+          console.error(e);
+        }
+      },
+    });
+  } else {
+    base.push({
+      icon: "i-carbon:login",
+      name: "Login with OpenRouter",
+      action: async () => {
+        popperOpen.value = false;
+        // Avoid awaiting navigation to preserve user gesture on iOS Safari
+        try {
+          setTimeout(() => {
+            try {
+              startLogin();
+            } catch (e) {
+              console.error(e);
+            }
+          }, 0);
+        } catch (e) {
+          console.error(e);
+        }
+      },
+    });
+  }
+  return base;
+});
+
+const threadsStore = useThreadsStore();
+const {
+  pinnedThreads: pinnedThreadsFromStore,
+  unpinnedThreads: groupedThreadsFromStore,
+} = storeToRefs(threadsStore);
+
+const openrouterConnected = ref(false);
+
+async function checkOpenRouterKey() {
+  // Check fast client storage first
+  const localKey =
+    typeof window !== "undefined"
+      ? localStorage.getItem("openrouter_api_key")
+      : null;
+  if (localKey) {
+    openrouterConnected.value = true;
+    return;
+  }
+  // Then check synced KV
+  try {
+    const { $sync } = useNuxtApp();
+    const kvKey = await $sync.getKV("openrouter_api_key").catch(() => null);
+    openrouterConnected.value = !!kvKey;
+  } catch (e) {
+    openrouterConnected.value = false;
+  }
+}
+
+onMounted(() => {
+  checkOpenRouterKey();
+  if (typeof window !== "undefined") {
+    window.addEventListener("storage", (e) => {
+      if (e.key === "openrouter_api_key") checkOpenRouterKey();
+    });
+    // also react to our custom event fired on successful OAuth exchange
+    window.addEventListener("openrouter:connected", () => {
+      checkOpenRouterKey();
+    });
+    document.addEventListener("visibilitychange", () => {
+      if (document.visibilityState === "visible") {
+        checkOpenRouterKey();
+      }
+    });
+  }
+});
+
+watch(
+  () => route.fullPath,
+  () => {
+    checkOpenRouterKey();
+  },
+);
+</script>
 ````
 
 ## File: packages/app/app/components/chat/ChatMessage.client.vue
@@ -7043,6 +8751,68 @@ const confirmDelete = async () => {
 </script>
 ````
 
+## File: packages/app/nuxt.config.ts
+````typescript
+// https://nuxt.com/docs/api/configuration/nuxt-config
+export default defineNuxtConfig({
+  compatibilityDate: "2024-11-01",
+  devtools: { enabled: true },
+  future: {
+    compatibilityVersion: 4,
+  },
+  build: {
+    transpile: ["wa-sqlite", "estree-walker"],
+  },
+  vite: {
+    optimizeDeps: {
+      exclude: ["wa-sqlite", "estree-walker"],
+    },
+  },
+  modules: [
+    "@nuxt/ui",
+    "@nuxt/fonts",
+    "@vueuse/nuxt",
+    "nuxt-svgo",
+    "@pinia/nuxt",
+    "nuxt-workers",
+  ],
+  app: {
+    head: {
+      link: [
+        {
+          rel: "stylesheet",
+          href: "https://cdn.jsdelivr.net/npm/katex@0.16.22/dist/katex.min.css",
+          integrity:
+            "sha384-5TcZemv2l/9On385z///+d7MSYlvIEw9FuZTIdZ14vJLqWphw7e7ZPuOiCHJcFCP",
+          crossorigin: "anonymous",
+        },
+      ],
+    },
+  },
+  runtimeConfig: {
+    public: {
+      apiUrl: "http://localhost:8787",
+      authUrl: "https://auth.chat.nuxflare.com",
+      authClientID: "nuxflare-chat",
+      sessionInterval: 5 * 60 * 1000,
+      openRouterRedirectUri: process.env.OPENROUTER_REDIRECT_URI || "",
+      openRouterAuthUrl: process.env.OPENROUTER_AUTH_URL || "",
+      openRouterClientId: process.env.OPENROUTER_CLIENT_ID || "",
+    },
+    openRouterClientId: process.env.OPENROUTER_CLIENT_ID || "",
+    openRouterClientSecret: process.env.OPENROUTER_CLIENT_SECRET || "",
+    openRouterAuthUrl: process.env.OPENROUTER_AUTH_URL || "",
+    openRouterTokenUrl: process.env.OPENROUTER_TOKEN_URL || "",
+    openRouterUserinfoUrl: process.env.OPENROUTER_USERINFO_URL || "",
+  },
+  css: ["~/assets/css/main.css"],
+  svgo: {
+    componentPrefix: "icon",
+    autoImportPath: "~/assets/icons",
+  },
+});
+````
+
 ## File: packages/app/package.json
 ````json
 {
@@ -7096,10 +8866,222 @@ const confirmDelete = async () => {
 }
 ````
 
+## File: packages/app/app/plugins/sync.client.ts
+````typescript
+export default defineNuxtPlugin({
+  name: "sync",
+  async setup() {
+    const isClient = typeof window !== "undefined";
+    const hasServiceWorker =
+      isClient && "serviceWorker" in navigator && window.isSecureContext;
+
+    // Fallback provider for environments without SW (e.g., iOS over HTTP)
+    if (!hasServiceWorker) {
+      console.warn(
+        "Service Worker not available (insecure context or unsupported). Running in fallback mode without sync.",
+      );
+      const fallbackKVGet = (k: string) =>
+        (typeof localStorage !== "undefined" && localStorage.getItem(k)) ||
+        null;
+      const fallbackKVSet = (k: string, v: string) => {
+        if (typeof localStorage !== "undefined") localStorage.setItem(k, v);
+        return true;
+      };
+      return {
+        provide: {
+          sync: {
+            async setAuthInfo() {
+              /* no-op */
+            },
+            async newThread() {
+              throw new Error("Sync not available in this environment");
+            },
+            async getThreads() {
+              return [];
+            },
+            async getMessagesForThread() {
+              return [];
+            },
+            async updateThread() {
+              /* no-op */
+            },
+            async sendMessage() {
+              throw new Error("Sync not available in this environment");
+            },
+            async getKV(name: string) {
+              return fallbackKVGet(name);
+            },
+            async setKV(name: string, value: string) {
+              return fallbackKVSet(name, value);
+            },
+            async retryMessage() {
+              /* no-op */
+            },
+            async branchThread() {
+              /* no-op */
+            },
+            async updateMessage() {
+              /* no-op */
+            },
+            async searchThreads() {
+              return [];
+            },
+            async clear() {
+              if (typeof localStorage !== "undefined") localStorage.clear();
+              return true;
+            },
+          },
+        },
+      };
+    }
+
+    await navigator.serviceWorker
+      .register("SharedService_ServiceWorker.js")
+      .then(() => navigator.serviceWorker.ready);
+    const sharedService = new SharedService(
+      "sync-service",
+      syncServiceProvider,
+    );
+    sharedService.activate();
+
+    let _ready = false;
+    let _syncReady = false;
+    const readyResolvers: Function[] = [];
+    const syncReadyResolvers: Function[] = [];
+    (async () => {
+      while (!_ready) {
+        await new Promise((res) => setTimeout(res, 30));
+        try {
+          _ready = await Promise.race([
+            new Promise((res) => setTimeout(res, 100)),
+            sharedService.proxy["isReady"]!(),
+          ]);
+        } catch (err) {
+          console.log("err", err);
+          // retry
+        }
+      }
+      console.log("_ready");
+      readyResolvers.forEach((res) => res());
+      while (!_syncReady) {
+        await new Promise((res) => setTimeout(res, 30));
+        try {
+          _syncReady = await sharedService.proxy["isSyncReady"]!();
+        } catch {
+          // retry
+        }
+      }
+      console.log("_syncReady");
+      syncReadyResolvers.forEach((res) => res());
+    })();
+
+    async function isReady() {
+      if (_ready) return true;
+      return new Promise((res) => {
+        readyResolvers.push(res);
+      });
+    }
+    async function isSyncReady() {
+      if (_syncReady) return true;
+      return new Promise((res) => {
+        syncReadyResolvers.push(res);
+      });
+    }
+
+    return {
+      provide: {
+        sync: {
+          async setAuthInfo(endpoint: string, token: string) {
+            await isReady();
+            return await sharedService.proxy["setAuthInfo"]!(endpoint, token);
+          },
+          async newThread(params: {
+            content: string;
+            attachments?: any[];
+            options: { name: string; thinkingBudget: string };
+          }) {
+            await isSyncReady();
+            return await sharedService.proxy["newThread"]!(params);
+          },
+          async getThreads() {
+            await isReady();
+            return await sharedService.proxy["getThreads"]!();
+          },
+          async getMessagesForThread(threadId: string) {
+            await isReady();
+            return await sharedService.proxy["getMessagesForThread"]!(threadId);
+          },
+          async updateThread(id: string, update: any) {
+            await isSyncReady();
+            return await sharedService.proxy["updateThread"]!(id, update);
+          },
+          async sendMessage(params: {
+            threadId: string;
+            content: string;
+            attachments?: any[];
+            options: { name: string; thinkingBudget: string };
+          }) {
+            await isSyncReady();
+            return await sharedService.proxy["sendMessage"]!(params);
+          },
+          async getKV(name: string) {
+            await isSyncReady();
+            return await sharedService.proxy["getKV"]!(name);
+          },
+          async setKV(name: string, value: string) {
+            await isSyncReady();
+            return await sharedService.proxy["setKV"]!(name, value);
+          },
+          async retryMessage(
+            messageId: string,
+            options?: { model?: string; thinkingBudget?: string },
+          ) {
+            await isSyncReady();
+            return await sharedService.proxy["retryMessage"]!(
+              messageId,
+              options,
+            );
+          },
+          async branchThread(
+            threadId: string,
+            messageId: string,
+            newThreadId: string,
+          ) {
+            await isSyncReady();
+            return await sharedService.proxy["branchThread"]!(
+              threadId,
+              messageId,
+              newThreadId,
+            );
+          },
+          async updateMessage(
+            id: string,
+            update: { data?: any; deleted?: boolean },
+          ) {
+            await isSyncReady();
+            return await sharedService.proxy["updateMessage"]!(id, update);
+          },
+          async searchThreads(query: string) {
+            await isReady();
+            return await sharedService.proxy["searchThreads"]!(query);
+          },
+          async clear() {
+            await isReady();
+            return await sharedService.proxy["clear"]!();
+          },
+        },
+      },
+    };
+  },
+});
+````
+
 ## File: packages/app/app/pages/[[id]].vue
 ````vue
 <template>
-  <div v-if="currentThreadId && activeThreadObject && activeThreadObject.deleted">
+  <div
+    v-if="currentThreadId && activeThreadObject && activeThreadObject.deleted"
+  >
     <div
       class="flex flex-col items-center justify-center min-h-screen text-center gap-5"
     >
@@ -7261,6 +9243,7 @@ const confirmDelete = async () => {
 </template>
 
 <script setup lang="ts">
+import { uuidv4 } from "~/utils/uuid";
 definePageMeta({
   layout: "chat",
 });
@@ -7447,7 +9430,7 @@ const retryMessage = async (messageId: string) => {
 };
 
 const branchThread = async (messageId: string) => {
-  const newThreadId = crypto.randomUUID();
+  const newThreadId = uuidv4();
   navigateTo(`/${newThreadId}`);
   await $sync.branchThread(currentThreadId.value, messageId, newThreadId);
 };
@@ -7499,156 +9482,13 @@ const scrollToBottom = () => {
 </style>
 ````
 
-## File: packages/app/app/plugins/sync.client.ts
-````typescript
-export default defineNuxtPlugin({
-  name: "sync",
-  async setup() {
-    await navigator.serviceWorker
-      .register("SharedService_ServiceWorker.js")
-      .then(() => navigator.serviceWorker.ready);
-    const sharedService = new SharedService(
-      "sync-service",
-      syncServiceProvider,
-    );
-    sharedService.activate();
-
-    let _ready = false;
-    let _syncReady = false;
-    const readyResolvers: Function[] = [];
-    const syncReadyResolvers: Function[] = [];
-    (async () => {
-      while (!_ready) {
-        await new Promise((res) => setTimeout(res, 30));
-        try {
-          _ready = await Promise.race([
-            new Promise((res) => setTimeout(res, 100)),
-            sharedService.proxy["isReady"]!(),
-          ]);
-        } catch (err) {
-          console.log("err", err);
-          // retry
-        }
-      }
-      console.log("_ready");
-      readyResolvers.forEach((res) => res());
-      while (!_syncReady) {
-        await new Promise((res) => setTimeout(res, 30));
-        try {
-          _syncReady = await sharedService.proxy["isSyncReady"]!();
-        } catch {
-          // retry
-        }
-      }
-      console.log("_syncReady");
-      syncReadyResolvers.forEach((res) => res());
-    })();
-
-    async function isReady() {
-      if (_ready) return true;
-      return new Promise((res) => {
-        readyResolvers.push(res);
-      });
-    }
-    async function isSyncReady() {
-      if (_syncReady) return true;
-      return new Promise((res) => {
-        syncReadyResolvers.push(res);
-      });
-    }
-
-    return {
-      provide: {
-        sync: {
-          async setAuthInfo(endpoint: string, token: string) {
-            await isReady();
-            return await sharedService.proxy["setAuthInfo"]!(endpoint, token);
-          },
-          async newThread(params: {
-            content: string;
-            attachments?: any[];
-            options: { name: string; thinkingBudget: string };
-          }) {
-            await isSyncReady();
-            return await sharedService.proxy["newThread"]!(params);
-          },
-          async getThreads() {
-            await isReady();
-            return await sharedService.proxy["getThreads"]!();
-          },
-          async getMessagesForThread(threadId: string) {
-            await isReady();
-            return await sharedService.proxy["getMessagesForThread"]!(threadId);
-          },
-          async updateThread(id: string, update: any) {
-            await isSyncReady();
-            return await sharedService.proxy["updateThread"]!(id, update);
-          },
-          async sendMessage(params: {
-            threadId: string;
-            content: string;
-            attachments?: any[];
-            options: { name: string; thinkingBudget: string };
-          }) {
-            await isSyncReady();
-            return await sharedService.proxy["sendMessage"]!(params);
-          },
-          async getKV(name: string) {
-            await isSyncReady();
-            return await sharedService.proxy["getKV"]!(name);
-          },
-          async setKV(name: string, value: string) {
-            await isSyncReady();
-            return await sharedService.proxy["setKV"]!(name, value);
-          },
-          async retryMessage(
-            messageId: string,
-            options?: { model?: string; thinkingBudget?: string },
-          ) {
-            await isSyncReady();
-            return await sharedService.proxy["retryMessage"]!(
-              messageId,
-              options,
-            );
-          },
-          async branchThread(
-            threadId: string,
-            messageId: string,
-            newThreadId: string,
-          ) {
-            await isSyncReady();
-            return await sharedService.proxy["branchThread"]!(
-              threadId,
-              messageId,
-              newThreadId,
-            );
-          },
-          async updateMessage(
-            id: string,
-            update: { data?: any; deleted?: boolean },
-          ) {
-            await isSyncReady();
-            return await sharedService.proxy["updateMessage"]!(id, update);
-          },
-          async searchThreads(query: string) {
-            await isReady();
-            return await sharedService.proxy["searchThreads"]!(query);
-          },
-          async clear() {
-            await isReady();
-            return await sharedService.proxy["clear"]!();
-          },
-        },
-      },
-    };
-  },
-});
-````
-
 ## File: packages/app/app/utils/sync-service.ts
 ````typescript
 import type { Thread } from "../composables/useThreadsStore";
+import { uuidv4 } from "~/utils/uuid";
 import type { PushEvent } from "@nuxflare-chat/api/types";
+import showToast from "./showToast";
+import { useOpenRouterAuth } from "../composables/useOpenRouterAuth";
 
 const THREADS_CHANNEL_NAME = "threads-channel";
 const threadsChannel = new BroadcastChannel(THREADS_CHANNEL_NAME);
@@ -7711,7 +9551,6 @@ async function initClock() {
     sql: `SELECT clock FROM clock WHERE id = 1`,
     bindings: undefined,
   });
-      let wsConnected = false;
   console.log("clock", rows);
   if (rows.length > 0) {
     _clock = rows[0][0] as number;
@@ -7728,14 +9567,12 @@ export function syncServiceProvider() {
     const num = Number(s);
     if (isNaN(num)) return 0;
     return num < 100000000000 ? num * 1000 : num; // Heuristic: if < 12 digits, assume seconds
-          onDisconnected() {
-            wsConnected = false;
-            console.log("disconnected!");
-          },
-          onConnected() {
-            wsConnected = true;
-            console.log("connected!");
-          },
+  };
+
+  function getMessageChannelName(threadId: string): string {
+    return `messages-channel-${threadId}`;
+  }
+
   async function updateClock(newClock: number) {
     if (newClock > _clock) {
       _clock = newClock;
@@ -7753,25 +9590,6 @@ export function syncServiceProvider() {
 
       if (!backendThread.id || newClock === undefined || newClock === null) {
         console.error("Invalid thread data or clock for applyChange:", msg);
-      async function pushEvents(pushObj: PushEvent) {
-        const payload = JSON.stringify(pushObj);
-        try {
-          if (wsConnected && wsSendFunction) {
-            wsSendFunction(payload);
-            return;
-          }
-        } catch {}
-        // Fallback to HTTP push if WS not connected or send errored
-        try {
-          await fetch(`${_endpoint}/push`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: payload,
-          });
-        } catch (e) {
-          console.error("Failed to push events via WS and HTTP fallback", e);
-        }
-      }
         return;
       }
 
@@ -7908,7 +9726,7 @@ export function syncServiceProvider() {
           newClock,
         ],
       });
-            await pushEvents(pushObj);
+      await updateClock(newClock);
     }
   }
 
@@ -7968,7 +9786,7 @@ export function syncServiceProvider() {
         try {
           const msg = JSON.parse(event.data as string);
           messageQueue.push(msg);
-            await pushEvents(pushObj);
+          startMessageQueue();
         } catch (e) {
           console.error(
             "Error processing message from backend:",
@@ -7984,7 +9802,7 @@ export function syncServiceProvider() {
   async function pullChanges() {
     isQueuePaused = true;
     try {
-            await pushEvents(pushObj);
+      const response = await fetch(`${_endpoint}/pull?clock=${_clock}`, {
         headers: {
           Authentication: `Bearer ${_token}`,
         },
@@ -8000,7 +9818,7 @@ export function syncServiceProvider() {
           await applyChange({
             type: "thread",
             clock: thread.clock,
-            await pushEvents(pushObj);
+            data: thread,
           });
         }
       }
@@ -8049,7 +9867,7 @@ export function syncServiceProvider() {
           await pullChanges();
           await restartWebsocketsServer();
           isSyncReady = true;
-            await pushEvents(pushObj);
+          console.log("sync ready!");
           syncReadyResolvers.forEach((resolve) => resolve());
           syncReadyResolvers = [];
         })();
@@ -8062,34 +9880,49 @@ export function syncServiceProvider() {
       options?: { name: string; thinkingBudget?: string };
     }) {
       await waitForSync();
-      const threadId = crypto.randomUUID();
-      const messageId = crypto.randomUUID();
+      const threadId = uuidv4();
+      const messageId = uuidv4();
       const title =
         params.title || params.content.substring(0, 50) || "New Chat";
-      // attach openrouter API key if available (try synced KV first, then localStorage)
-      let openrouterKey: string | null = null;
-      try {
-        const { $sync } = useNuxtApp();
-            await pushEvents(pushObj);
-          .getKV("openrouter_api_key")
-          .catch(() => null);
-      } catch (e) {
-        // ignore
-      }
-      if (!openrouterKey && typeof window !== "undefined") {
-        openrouterKey = localStorage.getItem("openrouter_api_key");
+      // Ensure an OpenRouter key is available or prompt to login
+      const keyFromOptions = (params.options as any)?.openrouterApiKey;
+      let openrouterKey: string | null = keyFromOptions ?? null;
+      if (!openrouterKey) {
+        const key = await (async () => {
+          try {
+            const { $sync } = useNuxtApp();
+            const kvKey = await $sync
+              .getKV("openrouter_api_key")
+              .catch(() => null);
+            if (kvKey) return kvKey as string;
+          } catch {}
+          if (typeof window !== "undefined") {
+            const lsKey = localStorage.getItem("openrouter_api_key");
+            if (lsKey) return lsKey;
+          }
+          return null;
+        })();
+        if (!key) {
+          // Prompt to login
+          const { startLogin } = useOpenRouterAuth();
+          showToast("OpenRouter key required. Please login.", "Missing key");
+          // small delay then trigger login action to keep it quick to act
+          setTimeout(() => startLogin(), 50);
+          throw new Error("OpenRouter key missing; blocked send.");
+        }
+        openrouterKey = key;
       }
       const pushObj: PushEvent = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         events: [
-              {
-                type: "new_thread",
-                data: {
-                  id: threadId,
-                  title,
-            await pushEvents(pushObj);
-                },
-              },
+          {
+            type: "new_thread",
+            data: {
+              id: threadId,
+              title,
+              parent_thread_id: undefined,
+            },
+          },
           {
             type: "new_message",
             data: {
@@ -8108,9 +9941,7 @@ export function syncServiceProvider() {
               threadId,
               options: {
                 ...(params.options || {}),
-                ...(params.options && (params.options as any).openrouterApiKey
-                  ? {}
-                  : { openrouterApiKey: openrouterKey }),
+                openrouterApiKey: openrouterKey,
               } as any,
             },
           },
@@ -8211,7 +10042,7 @@ export function syncServiceProvider() {
     async updateThread(id: string, update: any) {
       await waitForSync();
       const pushObj: PushEvent = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         events: [
           {
             type: "update_thread",
@@ -8231,24 +10062,39 @@ export function syncServiceProvider() {
       options?: { model: string; thinkingBudget?: string };
     }) {
       await waitForSync();
-      // attach openrouter API key if available
-      let openrouterKey: string | null = null;
-      try {
-        const { $sync } = useNuxtApp();
-        openrouterKey = await $sync
-          .getKV("openrouter_api_key")
-          .catch(() => null);
-      } catch {}
-      if (!openrouterKey && typeof window !== "undefined") {
-        openrouterKey = localStorage.getItem("openrouter_api_key");
+      // Ensure an OpenRouter key is available or prompt to login
+      const keyFromOptions = (params.options as any)?.openrouterApiKey;
+      let openrouterKey: string | null = keyFromOptions ?? null;
+      if (!openrouterKey) {
+        const key = await (async () => {
+          try {
+            const { $sync } = useNuxtApp();
+            const kvKey = await $sync
+              .getKV("openrouter_api_key")
+              .catch(() => null);
+            if (kvKey) return kvKey as string;
+          } catch {}
+          if (typeof window !== "undefined") {
+            const lsKey = localStorage.getItem("openrouter_api_key");
+            if (lsKey) return lsKey;
+          }
+          return null;
+        })();
+        if (!key) {
+          const { startLogin } = useOpenRouterAuth();
+          showToast("OpenRouter key required. Please login.", "Missing key");
+          setTimeout(() => startLogin(), 50);
+          throw new Error("OpenRouter key missing; blocked send.");
+        }
+        openrouterKey = key;
       }
       const pushObj: PushEvent = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         events: [
           {
             type: "new_message",
             data: {
-              id: crypto.randomUUID(),
+              id: uuidv4(),
               threadId: params.threadId,
               data: {
                 content: params.content,
@@ -8263,9 +10109,7 @@ export function syncServiceProvider() {
               threadId: params.threadId,
               options: {
                 ...(params.options || {}),
-                ...(params.options && (params.options as any).openrouterApiKey
-                  ? {}
-                  : { openrouterApiKey: openrouterKey }),
+                openrouterApiKey: openrouterKey,
               } as any,
             },
           },
@@ -8276,7 +10120,7 @@ export function syncServiceProvider() {
     async updateMessage(id: string, update: { data?: any; deleted?: boolean }) {
       await waitForSync();
       const pushObj: PushEvent = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         events: [
           {
             type: "update_message",
@@ -8307,19 +10151,34 @@ export function syncServiceProvider() {
 
       const threadId = rows[0][0];
 
-      // attach openrouter API key if available
-      let openrouterKey: string | null = null;
-      try {
-        const { $sync } = useNuxtApp();
-        openrouterKey = await $sync
-          .getKV("openrouter_api_key")
-          .catch(() => null);
-      } catch {}
-      if (!openrouterKey && typeof window !== "undefined") {
-        openrouterKey = localStorage.getItem("openrouter_api_key");
+      // Ensure an OpenRouter key is available or prompt to login
+      const keyFromOptions = (options as any)?.openrouterApiKey;
+      let openrouterKey: string | null = keyFromOptions ?? null;
+      if (!openrouterKey) {
+        const key = await (async () => {
+          try {
+            const { $sync } = useNuxtApp();
+            const kvKey = await $sync
+              .getKV("openrouter_api_key")
+              .catch(() => null);
+            if (kvKey) return kvKey as string;
+          } catch {}
+          if (typeof window !== "undefined") {
+            const lsKey = localStorage.getItem("openrouter_api_key");
+            if (lsKey) return lsKey;
+          }
+          return null;
+        })();
+        if (!key) {
+          const { startLogin } = useOpenRouterAuth();
+          showToast("OpenRouter key required. Please login.", "Missing key");
+          setTimeout(() => startLogin(), 50);
+          throw new Error("OpenRouter key missing; blocked run.");
+        }
+        openrouterKey = key;
       }
       const pushObj: PushEvent = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         events: [
           {
             type: "run_thread",
@@ -8328,9 +10187,7 @@ export function syncServiceProvider() {
               messageId,
               options: {
                 ...(options || {}),
-                ...(options && (options as any).openrouterApiKey
-                  ? {}
-                  : { openrouterApiKey: openrouterKey }),
+                openrouterApiKey: openrouterKey,
               } as any,
             },
           },
@@ -8345,7 +10202,7 @@ export function syncServiceProvider() {
     ) {
       await waitForSync();
       const pushObj: PushEvent = {
-        id: crypto.randomUUID(),
+        id: uuidv4(),
         events: [
           {
             type: "branch_thread",
